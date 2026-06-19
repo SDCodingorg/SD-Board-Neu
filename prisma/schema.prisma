@@ -1,0 +1,183 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  boards    BoardMember[]
+  ownedBoards Board[]    @relation("BoardOwner")
+  cards     Card[]       @relation("CardCreator")
+  comments  Comment[]
+  activities Activity[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Board {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  deadline    String?
+  coverColor  String   @default("#5865f2")
+  background  String?
+  shareToken  String?  @unique
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId  String
+  owner    User          @relation("BoardOwner", fields: [ownerId], references: [id])
+  members  BoardMember[]
+  columns  Column[]
+  cards    Card[]
+  activities Activity[]
+}
+
+model BoardMember {
+  id      String @id @default(cuid())
+  boardId String
+  userId  String
+  role    String @default("member")
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, userId])
+}
+
+model Column {
+  id       String @id @default(cuid())
+  title    String
+  order    Int    @default(0)
+  boardId  String
+
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards Card[]
+}
+
+model Card {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  priority    String   @default("medium")
+  labels      String[] @default([])
+  deadline    String?
+  startDate   String?
+  coverColor  String?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  columnId    String
+  boardId     String
+  createdById String
+
+  column    Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  board     Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("CardCreator", fields: [createdById], references: [id])
+  comments  Comment[]
+  checklists Checklist[]
+  assignees CardAssignee[]
+  timeTracking TimeTracking?
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  text      String
+  createdAt DateTime @default(now())
+  cardId    String
+  authorId  String
+
+  card   Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+}
+
+model Checklist {
+  id     String          @id @default(cuid())
+  title  String
+  cardId String
+  order  Int             @default(0)
+
+  card  Card            @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  items ChecklistItem[]
+}
+
+model ChecklistItem {
+  id          String  @id @default(cuid())
+  text        String
+  checked     Boolean @default(false)
+  order       Int     @default(0)
+  checklistId String
+
+  checklist Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+}
+
+model CardAssignee {
+  id     String @id @default(cuid())
+  cardId String
+  userId String
+  name   String
+  image  String?
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+}
+
+model TimeTracking {
+  id           String  @id @default(cuid())
+  totalSeconds Int     @default(0)
+  isRunning    Boolean @default(false)
+  startedAt    String?
+  cardId       String  @unique
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  action    String
+  detail    String?
+  createdAt DateTime @default(now())
+  boardId   String
+  userId    String
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+}
