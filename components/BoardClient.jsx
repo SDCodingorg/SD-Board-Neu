@@ -159,6 +159,7 @@ export default function BoardClient({ board: initialBoard, user }) {
 
   async function quickDeleteCard(cardId) {
     if (!canWrite) return toast('Du hast nur Leserechte')
+    if (!confirm('Diese Karte wirklich loeschen?')) return
     setContextMenu(null)
     setBoard(b => ({ ...b, cards: b.cards.filter(c => c.id !== cardId) }))
     await deleteCard(board.id, cardId)
@@ -310,7 +311,9 @@ export default function BoardClient({ board: initialBoard, user }) {
                 onOpenMenu={openCardMenu}
                 canWrite={canWrite}
                 onDeleteCol={() => {
-                  if (canWrite) deleteColumn(board.id, col.id).then(() => router.refresh())
+                  if (!canWrite) return
+                  if (!confirm(`Spalte "${col.title}" wirklich loeschen? Alle Karten darin werden ebenfalls geloescht.`)) return
+                  deleteColumn(board.id, col.id).then(() => router.refresh())
                 }}
               />
             ))}
@@ -371,6 +374,7 @@ export default function BoardClient({ board: initialBoard, user }) {
           }}
           onDelete={async (cardId) => {
             if (!canWrite) return toast('Du hast nur Leserechte')
+            if (!confirm('Diese Karte wirklich loeschen?')) return
             setOpenCardId(null)
             setBoard(b => ({ ...b, cards: b.cards.filter(c => c.id !== cardId) }))
             await deleteCard(board.id, cardId)
