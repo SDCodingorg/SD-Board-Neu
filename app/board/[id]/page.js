@@ -19,7 +19,21 @@ export default async function BoardPage({ params }) {
     },
     include: {
       members: {
-        include: { user: { select: { id: true, name: true, email: true, image: true } } },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+              accounts: {
+                where: { provider: 'discord' },
+                select: { providerAccountId: true },
+                take: 1,
+              },
+            },
+          },
+        },
         orderBy: { role: 'asc' },
       },
       columns: { orderBy: { order: 'asc' } },

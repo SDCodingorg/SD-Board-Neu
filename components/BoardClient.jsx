@@ -32,7 +32,7 @@ export default function BoardClient({ board: initialBoard, user }) {
   const [openCardId, setOpenCardId] = useState(null)
   const [activeId, setActiveId] = useState(null)
   const [membersOpen, setMembersOpen] = useState(false)
-  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteIdentifier, setInviteIdentifier] = useState('')
   const [inviteRole, setInviteRole] = useState('editor')
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
@@ -112,9 +112,9 @@ export default function BoardClient({ board: initialBoard, user }) {
 
   async function handleInviteMember(e) {
     e.preventDefault()
-    if (!inviteEmail.trim()) return
-    await addBoardMember(board.id, inviteEmail, inviteRole)
-    setInviteEmail('')
+    if (!inviteIdentifier.trim()) return
+    await addBoardMember(board.id, inviteIdentifier, inviteRole)
+    setInviteIdentifier('')
     setInviteRole('editor')
     toast('Mitglied hinzugefuegt')
     router.refresh()
@@ -197,9 +197,10 @@ export default function BoardClient({ board: initialBoard, user }) {
       {membersOpen && (
         <div style={{
           borderBottom:'1px solid var(--bd2)', background:'var(--ink2)',
-          padding:'14px 20px', display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(280px,360px)', gap:'18px',
+          padding:'14px 20px', display:'flex', gap:'14px', alignItems:'flex-start',
+          justifyContent:'space-between', flexWrap:'wrap', overflow:'hidden',
         }}>
-          <div style={{ display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center' }}>
+          <div style={{ display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center', minWidth:0, flex:'1 1 360px' }}>
             {board.members?.map(member => (
               <div key={member.id} style={{
                 display:'flex', alignItems:'center', gap:'8px', padding:'7px 9px',
@@ -214,6 +215,11 @@ export default function BoardClient({ board: initialBoard, user }) {
                 <div>
                   <div style={{ fontFamily:'var(--fb)', fontSize:'12px', color:'var(--td)' }}>{member.user?.name || member.user?.email}</div>
                   <div style={{ fontFamily:'var(--fm)', fontSize:'9px', color:'var(--faint)' }}>{member.user?.email}</div>
+                  {member.user?.accounts?.[0]?.providerAccountId && (
+                    <div style={{ fontFamily:'var(--fm)', fontSize:'9px', color:'var(--faint)' }}>
+                      ID: {member.user.accounts[0].providerAccountId}
+                    </div>
+                  )}
                 </div>
                 {canAdmin && member.role !== 'owner' ? (
                   <select value={member.role} onChange={e => handleRoleChange(member.userId, e.target.value)} style={{ padding:'5px 7px', fontSize:'11px' }}>
@@ -232,14 +238,17 @@ export default function BoardClient({ board: initialBoard, user }) {
           </div>
 
           {canAdmin && (
-            <form onSubmit={handleInviteMember} style={{ display:'flex', gap:'8px', alignItems:'center' }}>
-              <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="Discord Email" type="email" style={{ flex:1, padding:'8px 10px' }} />
-              <select value={inviteRole} onChange={e => setInviteRole(e.target.value)} style={{ padding:'8px 10px' }}>
+            <form onSubmit={handleInviteMember} style={{
+              display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap',
+              minWidth:0, flex:'1 1 360px', maxWidth:'520px',
+            }}>
+              <input value={inviteIdentifier} onChange={e => setInviteIdentifier(e.target.value)} placeholder="Discord Name, User ID oder Email" type="text" style={{ flex:'1 1 220px', minWidth:0, padding:'8px 10px' }} />
+              <select value={inviteRole} onChange={e => setInviteRole(e.target.value)} style={{ flex:'0 0 112px', minWidth:0, padding:'8px 10px' }}>
                 <option value="editor">Editor</option>
                 <option value="viewer">Nur lesen</option>
                 <option value="admin">Admin</option>
               </select>
-              <button type="submit" style={{ padding:'8px 12px', border:'none', borderRadius:'5px', background:'var(--em)', color:'#fff', fontWeight:700 }}>
+              <button type="submit" style={{ flex:'0 0 auto', padding:'8px 12px', border:'none', borderRadius:'5px', background:'var(--em)', color:'#fff', fontWeight:700 }}>
                 Hinzufuegen
               </button>
             </form>

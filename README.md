@@ -58,6 +58,8 @@ RUN_SEED=false
 
 `RUN_SEED=true` legt Demo-Daten an. Fuer echte Produktivdaten besser auf `false` lassen.
 
+Board-Mitglieder koennen nach ihrem ersten Discord-Login per Discord User ID, Discord-Name oder Email eingeladen werden. Wenn ein Name nicht eindeutig ist, die Discord User ID verwenden.
+
 ### 3. NEXTAUTH_SECRET generieren
 
 ```bash
