@@ -23,6 +23,7 @@ const PRIORITIES = {
   medium: { color:'#eab308', bg:'rgba(234,179,8,.15)',   border:'rgba(234,179,8,.3)',  label:'Medium' },
   low:    { color:'#22c55e', bg:'rgba(34,197,94,.15)',   border:'rgba(34,197,94,.3)',  label:'Low'    },
 }
+const LABELS = ['dev','design','bug','docs','qa','ux']
 
 export default function BoardClient({ board: initialBoard, user }) {
   const router = useRouter()
@@ -34,6 +35,8 @@ export default function BoardClient({ board: initialBoard, user }) {
   const [membersOpen, setMembersOpen] = useState(false)
   const [inviteIdentifier, setInviteIdentifier] = useState('')
   const [inviteRole, setInviteRole] = useState('editor')
+  const [inviteError, setInviteError] = useState('')
+  const [contextMenu, setContextMenu] = useState(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
@@ -112,8 +115,13 @@ export default function BoardClient({ board: initialBoard, user }) {
 
   async function handleInviteMember(e) {
     e.preventDefault()
+    setInviteError('')
     if (!inviteIdentifier.trim()) return
-    await addBoardMember(board.id, inviteIdentifier, inviteRole)
+    const result = await addBoardMember(board.id, inviteIdentifier, inviteRole)
+    if (!result?.ok) {
+      setInviteError(result?.error || 'Mitglied konnte nicht hinzugefuegt werden')
+      return
+    }
     setInviteIdentifier('')
     setInviteRole('editor')
     toast('Mitglied hinzugefuegt')
@@ -132,6 +140,32 @@ export default function BoardClient({ board: initialBoard, user }) {
     router.refresh()
   }
 
+  function openCardMenu(e, cardId) {
+    e.preventDefault()
+    e.stopPropagation()
+    const width = 240
+    const height = 330
+    const x = Math.min(e.clientX, window.innerWidth - width - 12)
+    const y = Math.min(e.clientY, window.innerHeight - height - 12)
+    setContextMenu({ cardId, x: Math.max(12, x), y: Math.max(12, y) })
+  }
+
+  async function quickUpdateCard(cardId, data) {
+    if (!canWrite) return toast('Du hast nur Leserechte')
+    setBoard(b => ({ ...b, cards: b.cards.map(c => c.id === cardId ? { ...c, ...data } : c) }))
+    await updateCard(board.id, cardId, data)
+    router.refresh()
+  }
+
+  async function quickDeleteCard(cardId) {
+    if (!canWrite) return toast('Du hast nur Leserechte')
+    setContextMenu(null)
+    setBoard(b => ({ ...b, cards: b.cards.filter(c => c.id !== cardId) }))
+    await deleteCard(board.id, cardId)
+    toast('Karte geloescht')
+    router.refresh()
+  }
+
   const viewBtn = (v, label) => (
     <button onClick={() => setView(v)} style={{
       fontFamily:'var(--fm)', fontSize:'11px', letterSpacing:'1px',
@@ -146,7 +180,7 @@ export default function BoardClient({ board: initialBoard, user }) {
   const activeCard = board.cards.find(c => c.id === activeId)
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 64px)' }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 64px)' }} onClick={() => setContextMenu(null)}>
       {/* Board Header */}
       <div style={{
         height:'52px', display:'flex', alignItems:'center', justifyContent:'space-between',
@@ -251,6 +285,11 @@ export default function BoardClient({ board: initialBoard, user }) {
               <button type="submit" style={{ flex:'0 0 auto', padding:'8px 12px', border:'none', borderRadius:'5px', background:'var(--em)', color:'#fff', fontWeight:700 }}>
                 Hinzufuegen
               </button>
+              {inviteError && (
+                <div style={{ flex:'1 1 100%', color:'#ef4444', fontFamily:'var(--fm)', fontSize:'11px' }}>
+                  {inviteError}
+                </div>
+              )}
             </form>
           )}
         </div>
@@ -268,6 +307,7 @@ export default function BoardClient({ board: initialBoard, user }) {
                 boardId={board.id}
                 onAddCard={handleAddCard}
                 onOpenCard={setOpenCardId}
+                onOpenMenu={openCardMenu}
                 canWrite={canWrite}
                 onDeleteCol={() => {
                   if (canWrite) deleteColumn(board.id, col.id).then(() => router.refresh())
@@ -348,12 +388,35 @@ export default function BoardClient({ board: initialBoard, user }) {
           }}
         />
       )}
+
+      {contextMenu && (
+        <CardContextMenu
+          card={board.cards.find(c => c.id === contextMenu.cardId)}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          canWrite={canWrite}
+          onClose={() => setContextMenu(null)}
+          onOpen={() => {
+            setOpenCardId(contextMenu.cardId)
+            setContextMenu(null)
+          }}
+          onPriority={(priority) => quickUpdateCard(contextMenu.cardId, { priority })}
+          onToggleLabel={(label) => {
+            const card = board.cards.find(c => c.id === contextMenu.cardId)
+            if (!card) return
+            const labels = card.labels || []
+            const next = labels.includes(label) ? labels.filter(l => l !== label) : [...labels, label]
+            quickUpdateCard(card.id, { labels: next })
+          }}
+          onDelete={() => quickDeleteCard(contextMenu.cardId)}
+        />
+      )}
     </div>
   )
 }
 
 // ── KanbanColumn ─────────────────────────────────────────────
-function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol, canWrite }) {
+function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onOpenMenu, onDeleteCol, canWrite }) {
   const [adding, setAdding] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const { setNodeRef } = useDroppable({ id: col.id })
@@ -388,7 +451,7 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol,
       <div ref={setNodeRef} style={{ flex:1, overflowY:'auto', padding:'8px', display:'flex', flexDirection:'column', gap:'6px', minHeight:'40px' }}>
         <SortableContext items={cards.map(c => c.id)} strategy={verticalListSortingStrategy}>
           {cards.map(card => (
-            <SortableCard key={card.id} card={card} onOpen={() => onOpenCard(card.id)} />
+            <SortableCard key={card.id} card={card} onOpen={() => onOpenCard(card.id)} onOpenMenu={onOpenMenu} />
           ))}
         </SortableContext>
 
@@ -433,7 +496,7 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol,
 }
 
 // ── SortableCard ─────────────────────────────────────────────
-function SortableCard({ card, onOpen }) {
+function SortableCard({ card, onOpen, onOpenMenu }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id })
   const p = PRIORITIES[card.priority] || PRIORITIES.medium
   const isOD = card.deadline && new Date(card.deadline) < new Date()
@@ -448,6 +511,7 @@ function SortableCard({ card, onOpen }) {
     >
       <div
         onClick={onOpen}
+        onContextMenu={e => onOpenMenu(e, card.id)}
         {...attributes} {...listeners}
         style={{
           background:'var(--ink3)', border:'1px solid var(--bd)',
@@ -486,4 +550,91 @@ function SortableCard({ card, onOpen }) {
       </div>
     </div>
   )
+}
+
+function CardContextMenu({ card, x, y, canWrite, onClose, onOpen, onPriority, onToggleLabel, onDelete }) {
+  if (!card) return null
+  const labels = card.labels || []
+
+  return (
+    <div
+      onClick={e => e.stopPropagation()}
+      onContextMenu={e => e.preventDefault()}
+      style={{
+        position:'fixed', left:x, top:y, zIndex:500, width:'240px',
+        background:'var(--ink2)', border:'1px solid var(--bd2)', borderRadius:'8px',
+        boxShadow:'0 18px 60px rgba(0,0,0,.45)', padding:'10px',
+      }}
+    >
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+        <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', letterSpacing:'1px', textTransform:'uppercase' }}>Schnell bearbeiten</div>
+        <button onClick={onClose} style={{ background:'transparent', border:'none', color:'var(--faint)', fontSize:'14px' }}>x</button>
+      </div>
+
+      <button onClick={onOpen} style={menuButtonStyle}>Details oeffnen</button>
+
+      <div style={menuSectionStyle}>Prioritaet</div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'6px' }}>
+        {Object.entries(PRIORITIES).map(([key, p]) => (
+          <button
+            key={key}
+            disabled={!canWrite}
+            onClick={() => onPriority(key)}
+            style={{
+              padding:'6px 4px', borderRadius:'5px', cursor:canWrite ? 'pointer' : 'not-allowed',
+              border: card.priority === key ? `1px solid ${p.color}` : '1px solid var(--bd2)',
+              background:p.bg, color:p.color, fontFamily:'var(--fm)', fontSize:'10px',
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={menuSectionStyle}>Tags</div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+        {LABELS.map(label => (
+          <button
+            key={label}
+            disabled={!canWrite}
+            onClick={() => onToggleLabel(label)}
+            style={{
+              padding:'4px 8px', borderRadius:'4px', cursor:canWrite ? 'pointer' : 'not-allowed',
+              border: labels.includes(label) ? '1px solid rgba(88,101,242,.55)' : '1px solid var(--bd2)',
+              background: labels.includes(label) ? 'rgba(88,101,242,.25)' : 'var(--ink3)',
+              color: labels.includes(label) ? '#9da5f3' : 'var(--dim)',
+              fontFamily:'var(--fm)', fontSize:'10px',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <button
+        disabled={!canWrite}
+        onClick={onDelete}
+        style={{
+          ...menuButtonStyle,
+          marginTop:'10px',
+          color:'rgba(239,68,68,.8)',
+          borderColor:'rgba(239,68,68,.3)',
+          cursor:canWrite ? 'pointer' : 'not-allowed',
+        }}
+      >
+        Karte loeschen
+      </button>
+    </div>
+  )
+}
+
+const menuButtonStyle = {
+  width:'100%', padding:'8px 10px', background:'var(--ink3)',
+  border:'1px solid var(--bd2)', borderRadius:'5px', color:'var(--dim)',
+  fontFamily:'var(--fb)', fontSize:'13px', cursor:'pointer', textAlign:'left',
+}
+
+const menuSectionStyle = {
+  fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)',
+  letterSpacing:'1px', textTransform:'uppercase', margin:'12px 0 7px',
 }
