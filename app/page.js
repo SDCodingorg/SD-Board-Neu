@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import DashboardClient from '@/components/DashboardClient'
 
+export const dynamic = 'force-dynamic'
+
 export default async function Dashboard() {
   const session = await getServerSession(authOptions)
   if (!session) redirect('/auth')

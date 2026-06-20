@@ -1,5 +1,5 @@
 'use client'
-import { useState, useTransition, useOptimistic } from 'react'
+import { useState } from 'react'
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   closestCorners, useDroppable
@@ -13,7 +13,8 @@ import { useRouter } from 'next/navigation'
 import { useToast } from '@/context/ToastContext'
 import {
   addCard, moveCard, deleteBoard, addColumn, deleteColumn, renameColumn,
-  addComment, updateCard, deleteCard, toggleShare, updateChecklist
+  addComment, updateCard, deleteCard, toggleShare, updateChecklist,
+  addBoardMember, updateBoardMemberRole, removeBoardMember
 } from '@/lib/actions/boards'
 import CardModal from './CardModal'
 
@@ -26,21 +27,29 @@ const PRIORITIES = {
 export default function BoardClient({ board: initialBoard, user }) {
   const router = useRouter()
   const toast = useToast()
-  const [isPending, startTransition] = useTransition()
   const [board, setBoard] = useState(initialBoard)
   const [view, setView] = useState('kanban')
   const [openCardId, setOpenCardId] = useState(null)
   const [activeId, setActiveId] = useState(null)
+  const [membersOpen, setMembersOpen] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState('editor')
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   const openCard = board.cards.find(c => c.id === openCardId)
+  const currentMember = board.members?.find(m => m.userId === user?.id)
+  const currentRole = currentMember?.role || 'viewer'
+  const canWrite = ['owner', 'admin', 'editor'].includes(currentRole)
+  const canAdmin = ['owner', 'admin'].includes(currentRole)
+  const isOwner = currentRole === 'owner'
 
   function cardsByCol(colId) {
     return board.cards.filter(c => c.columnId === colId).sort((a,b) => a.order - b.order)
   }
 
   async function handleMoveCard(cardId, toColId, order) {
+    if (!canWrite) return toast('Du hast nur Leserechte')
     setBoard(b => ({
       ...b,
       cards: b.cards.map(c => c.id === cardId ? { ...c, columnId: toColId, order } : c)
@@ -74,6 +83,7 @@ export default function BoardClient({ board: initialBoard, user }) {
   }
 
   async function handleAddCard(colId, title) {
+    if (!canWrite) throw new Error('Du hast nur Leserechte')
     const id = await addCard(board.id, colId, { title, priority:'medium' })
     toast('Karte erstellt')
     router.refresh()
@@ -81,12 +91,14 @@ export default function BoardClient({ board: initialBoard, user }) {
   }
 
   async function handleDeleteBoard() {
+    if (!isOwner) return toast('Nur der Owner kann das Board loeschen')
     if (!confirm('Board wirklich löschen?')) return
     await deleteBoard(board.id)
     router.push('/')
   }
 
   async function handleToggleShare() {
+    if (!canAdmin) return toast('Keine Berechtigung')
     const token = await toggleShare(board.id)
     setBoard(b => ({ ...b, shareToken: token, isPublic: !!token }))
     if (token) {
@@ -96,6 +108,28 @@ export default function BoardClient({ board: initialBoard, user }) {
     } else {
       toast('Teilen deaktiviert')
     }
+  }
+
+  async function handleInviteMember(e) {
+    e.preventDefault()
+    if (!inviteEmail.trim()) return
+    await addBoardMember(board.id, inviteEmail, inviteRole)
+    setInviteEmail('')
+    setInviteRole('editor')
+    toast('Mitglied hinzugefuegt')
+    router.refresh()
+  }
+
+  async function handleRoleChange(memberUserId, role) {
+    await updateBoardMemberRole(board.id, memberUserId, role)
+    toast('Rolle aktualisiert')
+    router.refresh()
+  }
+
+  async function handleRemoveMember(memberUserId) {
+    await removeBoardMember(board.id, memberUserId)
+    toast('Mitglied entfernt')
+    router.refresh()
   }
 
   const viewBtn = (v, label) => (
@@ -123,6 +157,7 @@ export default function BoardClient({ board: initialBoard, user }) {
           <div style={{ width:'4px', height:'4px', borderRadius:'50%', background:board.coverColor }} />
           <span style={{ fontFamily:'var(--fd)', fontSize:'22px', letterSpacing:'1px', color:'var(--td)' }}>{board.title}</span>
           <span style={{ fontFamily:'var(--fm)', fontSize:'11px', color:'var(--faint)' }}>{board.cards.length} Aufgaben</span>
+          <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', textTransform:'uppercase' }}>{currentRole}</span>
         </div>
 
         <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
@@ -142,6 +177,15 @@ export default function BoardClient({ board: initialBoard, user }) {
             {board.isPublic ? '🔗 Teilen' : '⬡ Teilen'}
           </button>
 
+          <button onClick={() => setMembersOpen(v => !v)} style={{
+            fontFamily:'var(--fm)', fontSize:'11px', letterSpacing:'1px', textTransform:'uppercase',
+            padding:'6px 12px', borderRadius:'5px', cursor:'pointer', background:'transparent',
+            color: membersOpen ? '#9da5f3' : 'var(--dim)',
+            border: membersOpen ? '1px solid rgba(88,101,242,.4)' : '1px solid var(--bd)',
+          }}>
+            Mitglieder
+          </button>
+
           <button onClick={handleDeleteBoard} style={{
             fontFamily:'var(--fm)', fontSize:'11px', letterSpacing:'1px', textTransform:'uppercase',
             padding:'6px 12px', borderRadius:'5px', cursor:'pointer', background:'transparent',
@@ -149,6 +193,59 @@ export default function BoardClient({ board: initialBoard, user }) {
           }}>Löschen</button>
         </div>
       </div>
+
+      {membersOpen && (
+        <div style={{
+          borderBottom:'1px solid var(--bd2)', background:'var(--ink2)',
+          padding:'14px 20px', display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(280px,360px)', gap:'18px',
+        }}>
+          <div style={{ display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center' }}>
+            {board.members?.map(member => (
+              <div key={member.id} style={{
+                display:'flex', alignItems:'center', gap:'8px', padding:'7px 9px',
+                border:'1px solid var(--bd2)', borderRadius:'6px', background:'var(--ink3)',
+              }}>
+                {member.user?.image
+                  ? <img src={member.user.image} alt="" style={{ width:'24px', height:'24px', borderRadius:'50%' }} />
+                  : <div style={{ width:'24px', height:'24px', borderRadius:'50%', background:'var(--em)', color:'#fff', fontFamily:'var(--fd)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      {(member.user?.name || member.user?.email || '?')[0].toUpperCase()}
+                    </div>
+                }
+                <div>
+                  <div style={{ fontFamily:'var(--fb)', fontSize:'12px', color:'var(--td)' }}>{member.user?.name || member.user?.email}</div>
+                  <div style={{ fontFamily:'var(--fm)', fontSize:'9px', color:'var(--faint)' }}>{member.user?.email}</div>
+                </div>
+                {canAdmin && member.role !== 'owner' ? (
+                  <select value={member.role} onChange={e => handleRoleChange(member.userId, e.target.value)} style={{ padding:'5px 7px', fontSize:'11px' }}>
+                    <option value="admin">Admin</option>
+                    <option value="editor">Editor</option>
+                    <option value="viewer">Lesen</option>
+                  </select>
+                ) : (
+                  <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', textTransform:'uppercase' }}>{member.role}</span>
+                )}
+                {canAdmin && member.role !== 'owner' && (
+                  <button onClick={() => handleRemoveMember(member.userId)} style={{ background:'transparent', border:'none', color:'var(--faint)', fontSize:'16px' }}>x</button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {canAdmin && (
+            <form onSubmit={handleInviteMember} style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+              <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="Discord Email" type="email" style={{ flex:1, padding:'8px 10px' }} />
+              <select value={inviteRole} onChange={e => setInviteRole(e.target.value)} style={{ padding:'8px 10px' }}>
+                <option value="editor">Editor</option>
+                <option value="viewer">Nur lesen</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button type="submit" style={{ padding:'8px 12px', border:'none', borderRadius:'5px', background:'var(--em)', color:'#fff', fontWeight:700 }}>
+                Hinzufuegen
+              </button>
+            </form>
+          )}
+        </div>
+      )}
 
       {/* Board Content */}
       {view === 'kanban' && (
@@ -162,12 +259,15 @@ export default function BoardClient({ board: initialBoard, user }) {
                 boardId={board.id}
                 onAddCard={handleAddCard}
                 onOpenCard={setOpenCardId}
-                onDeleteCol={() => { deleteColumn(board.id, col.id).then(() => router.refresh()) }}
+                canWrite={canWrite}
+                onDeleteCol={() => {
+                  if (canWrite) deleteColumn(board.id, col.id).then(() => router.refresh())
+                }}
               />
             ))}
 
             {/* Add Column */}
-            <button onClick={async () => {
+            {canWrite && <button onClick={async () => {
               const title = prompt('Spalten-Name:')
               if (title?.trim()) {
                 await addColumn(board.id, title.trim())
@@ -183,7 +283,7 @@ export default function BoardClient({ board: initialBoard, user }) {
               transition:'all .15s',
             }}>
               + Spalte
-            </button>
+            </button>}
           </div>
 
           <DragOverlay>
@@ -203,7 +303,7 @@ export default function BoardClient({ board: initialBoard, user }) {
 
       {view === 'calendar' && (
         <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--ink)' }}>
-          <div style={{ fontFamily:'var(--fm)', fontSize:'13px', color:'var(--faint)' }}>// Kalender kommt bald</div>
+          <div style={{ fontFamily:'var(--fm)', fontSize:'13px', color:'var(--faint)' }}>Kalender kommt bald</div>
         </div>
       )}
 
@@ -215,11 +315,13 @@ export default function BoardClient({ board: initialBoard, user }) {
           user={user}
           onClose={() => setOpenCardId(null)}
           onUpdate={async (cardId, data) => {
+            if (!canWrite) return toast('Du hast nur Leserechte')
             setBoard(b => ({ ...b, cards: b.cards.map(c => c.id === cardId ? { ...c, ...data } : c) }))
             await updateCard(board.id, cardId, data)
             router.refresh()
           }}
           onDelete={async (cardId) => {
+            if (!canWrite) return toast('Du hast nur Leserechte')
             setOpenCardId(null)
             setBoard(b => ({ ...b, cards: b.cards.filter(c => c.id !== cardId) }))
             await deleteCard(board.id, cardId)
@@ -242,7 +344,7 @@ export default function BoardClient({ board: initialBoard, user }) {
 }
 
 // ── KanbanColumn ─────────────────────────────────────────────
-function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol }) {
+function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol, canWrite }) {
   const [adding, setAdding] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const { setNodeRef } = useDroppable({ id: col.id })
@@ -268,8 +370,8 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol 
           <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', background:'var(--ink3)', border:'1px solid var(--bd)', borderRadius:'10px', padding:'1px 7px' }}>{cards.length}</span>
         </div>
         <div style={{ display:'flex', gap:'6px' }}>
-          <button onClick={() => setAdding(true)} style={{ background:'none', border:'none', color:'var(--faint)', cursor:'pointer', fontSize:'14px', padding:'2px 5px' }}>+</button>
-          <button onClick={onDeleteCol} style={{ background:'none', border:'none', color:'var(--faint)', cursor:'pointer', fontSize:'11px', padding:'2px 5px' }}>···</button>
+          {canWrite && <button onClick={() => setAdding(true)} style={{ background:'none', border:'none', color:'var(--faint)', cursor:'pointer', fontSize:'14px', padding:'2px 5px' }}>+</button>}
+          {canWrite && <button onClick={onDeleteCol} style={{ background:'none', border:'none', color:'var(--faint)', cursor:'pointer', fontSize:'11px', padding:'2px 5px' }}>···</button>}
         </div>
       </div>
 
@@ -282,7 +384,7 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol 
         </SortableContext>
 
         {cards.length === 0 && !adding && (
-          <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', textAlign:'center', padding:'20px 0', opacity:.5 }}>// leer</div>
+          <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', textAlign:'center', padding:'20px 0', opacity:.5 }}>Leer</div>
         )}
       </div>
 
@@ -308,7 +410,7 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol 
             <button type="button" onClick={() => { setAdding(false); setNewTitle('') }} style={{ padding:'7px 10px', background:'transparent', border:'1px solid var(--bd2)', borderRadius:'5px', color:'var(--dim)', fontSize:'13px', cursor:'pointer' }}>×</button>
           </div>
         </form>
-      ) : (
+      ) : canWrite ? (
         <button onClick={() => setAdding(true)} style={{
           margin:'6px 8px 8px', padding:'8px', background:'transparent',
           border:'1px dashed var(--bd2)', borderRadius:'6px', color:'var(--faint)',
@@ -316,7 +418,7 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onDeleteCol 
         }}>
           + Karte hinzufügen
         </button>
-      )}
+      ) : null}
     </div>
   )
 }

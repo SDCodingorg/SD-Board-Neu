@@ -11,7 +11,7 @@ export default function DashboardClient({ boards, user }) {
       {/* Header */}
       <div style={{ borderBottom:'1px solid var(--bd)', padding:'44px 32px 32px', maxWidth:'1400px', margin:'0 auto' }}>
         <div style={{ fontFamily:'var(--fm)', fontSize:'11px', color:'var(--faint)', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px' }}>
-          // Hallo, {user?.name || user?.email}
+          Hallo, {user?.name || user?.email}
         </div>
         <h1 style={{ fontFamily:'var(--fd)', fontSize:'clamp(42px,5vw,64px)', letterSpacing:'2px', color:'var(--td)', marginBottom:'8px' }}>
           MEINE BOARDS.
@@ -71,7 +71,7 @@ export default function DashboardClient({ boards, user }) {
             onMouseEnter={e => { e.currentTarget.style.borderColor='var(--em)'; e.currentTarget.style.background='var(--em-bg)' }}
             onMouseLeave={e => { e.currentTarget.style.borderColor='var(--bd2)'; e.currentTarget.style.background='var(--ink2)' }}
           >
-            <div style={{ fontFamily:'var(--fm)', fontSize:'9px', color:'var(--faint)', letterSpacing:'2px', textTransform:'uppercase' }}>// Neu</div>
+            <div style={{ fontFamily:'var(--fm)', fontSize:'9px', color:'var(--faint)', letterSpacing:'2px', textTransform:'uppercase' }}>Neu</div>
             <div style={{ fontFamily:'var(--fd)', fontSize:'26px', letterSpacing:'2px', color:'var(--faint)' }}>+ BOARD</div>
           </div>
         </div>

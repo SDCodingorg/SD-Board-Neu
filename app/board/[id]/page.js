@@ -5,6 +5,8 @@ import { redirect, notFound } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import BoardClient from '@/components/BoardClient'
 
+export const dynamic = 'force-dynamic'
+
 export default async function BoardPage({ params }) {
   const { id } = await params
   const session = await getServerSession(authOptions)
@@ -16,6 +18,10 @@ export default async function BoardPage({ params }) {
       members: { some: { userId: session.user.id } }
     },
     include: {
+      members: {
+        include: { user: { select: { id: true, name: true, email: true, image: true } } },
+        orderBy: { role: 'asc' },
+      },
       columns: { orderBy: { order: 'asc' } },
       cards: {
         include: {
@@ -33,11 +39,17 @@ export default async function BoardPage({ params }) {
 
   // Serialize dates
   const data = JSON.parse(JSON.stringify(board))
+  const versionKey = [
+    data.updatedAt,
+    data.columns.map(c => `${c.id}:${c.order}`).join('|'),
+    data.cards.map(c => `${c.id}:${c.columnId}:${c.order}:${c.updatedAt}`).join('|'),
+    data.members.map(m => `${m.userId}:${m.role}`).join('|'),
+  ].join('::')
 
   return (
     <>
       <Navbar user={session.user} />
-      <BoardClient board={data} user={session.user} />
+      <BoardClient key={versionKey} board={data} user={session.user} />
     </>
   )
 }

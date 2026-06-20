@@ -41,7 +41,8 @@ export default function CreateBoardForm() {
     setLoad(true)
     try {
       const id = await createBoard({ title, description:desc, deadline:dl, coverColor:color, background:activeBg })
-      router.push(`/board/${id}`)
+      router.replace(`/board/${id}`)
+      router.refresh()
     } catch (err) {
       setError(err.message); setLoad(false)
     }

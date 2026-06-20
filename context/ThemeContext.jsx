@@ -4,12 +4,10 @@ import { createContext, useContext, useEffect, useState } from 'react'
 const ThemeContext = createContext(null)
 
 export function ThemeProvider({ children }) {
-  const [dark, setDark] = useState(true)
-
-  useEffect(() => {
-    const saved = localStorage.getItem('sdboard-theme')
-    if (saved) setDark(saved === 'dark')
-  }, [])
+  const [dark, setDark] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return localStorage.getItem('sdboard-theme') !== 'light'
+  })
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')

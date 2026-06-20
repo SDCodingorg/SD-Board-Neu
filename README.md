@@ -1,17 +1,17 @@
-# SDBoard — Next.js + Prisma + PostgreSQL
+# SDBoard - Next.js + Prisma + PostgreSQL
 
 Kollaboratives Projektmanagement-Tool.
 
 ## Stack
-- **Next.js 15** (App Router, Server Components, Server Actions)
-- **Prisma ORM** (DB-Abstraktion, Migrationen)
-- **PostgreSQL** (läuft via Coolify auf deinem Server)
+- **Next.js 16** (App Router, Server Components, Server Actions)
+- **Prisma ORM** (DB-Abstraktion, Schema-Sync)
+- **PostgreSQL** (laeuft via Coolify auf deinem Server)
 - **NextAuth v4** (Sessions, OAuth, Credentials)
 
 ## Lokale Entwicklung
 
 ```bash
-# 1. Abhängigkeiten
+# 1. Abhaengigkeiten
 npm install
 
 # 2. PostgreSQL starten (Docker)
@@ -21,7 +21,7 @@ docker run -d --name sdboard-db \
   -e POSTGRES_PASSWORD=sdboard123 \
   -p 5432:5432 postgres:16-alpine
 
-# 3. .env anpassen (liegt bereits vor)
+# 3. .env anpassen
 
 # 4. DB Schema + Seed
 npx prisma db push
@@ -34,34 +34,64 @@ npm run dev
 ## Deployment via Coolify
 
 ### 1. PostgreSQL in Coolify erstellen
-- Coolify → Resources → New → PostgreSQL
-- User: `sdboard`, DB: `sdboard`, Passwort wählen
+- Coolify -> Resources -> New -> PostgreSQL
+- User: `sdboard`, DB: `sdboard`, Passwort waehlen
 - Connection-String notieren
 
 ### 2. App deployen
-- Coolify → New Service → Git Repository
+- Coolify -> New Service -> Git Repository
 - Repository-URL eintragen
 - Build-Pack: **Dockerfile**
+- Port: **3000**
 - Environment Variables setzen:
 
-```
+```env
 DATABASE_URL=postgresql://sdboard:PASSWORT@COOLIFY_DB_HOST:5432/sdboard
 NEXTAUTH_URL=https://deine-domain.de
 NEXTAUTH_SECRET=langer-zufaelliger-string
-GOOGLE_CLIENT_ID=... (optional)
-GOOGLE_CLIENT_SECRET=... (optional)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+DISCORD_CLIENT_ID=
+DISCORD_CLIENT_SECRET=
+RUN_SEED=false
 ```
 
+`RUN_SEED=true` legt Demo-Daten an. Fuer echte Produktivdaten besser auf `false` lassen.
+
 ### 3. NEXTAUTH_SECRET generieren
+
 ```bash
 openssl rand -base64 32
 ```
 
 ### 4. Authorized Redirect URI (Google OAuth, falls genutzt)
+
 In Google Cloud Console:
-`https://deine-domain.de/api/auth/callback/google`
+
+```text
+https://deine-domain.de/api/auth/callback/google
+```
+
+Discord Developer Portal:
+
+```text
+https://deine-domain.de/api/auth/callback/discord
+```
+
+### 5. Optional: Server Actions hinter Proxy
+
+Normalerweise reicht Same-Origin. Falls Coolify oder ein Proxy einen abweichenden Origin sendet:
+
+```env
+SERVER_ACTION_ALLOWED_ORIGINS=deine-domain.de
+```
+
+### Healthcheck
+
+Der Container stellt `GET /api/health` bereit und prueft dabei auch die Datenbankverbindung.
 
 ## Demo-Login
-Nach dem ersten Deploy (Seed läuft automatisch):
+
+Nur wenn `RUN_SEED=true` gesetzt wurde:
 - Email: `demo@sdboard.dev`
 - Passwort: `demo1234`

@@ -22,7 +22,7 @@ export default async function SharePage({ params }) {
           <span style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'18px', letterSpacing:'3px' }}>BOARD</span>
           <span style={{ color:'rgba(237,234,227,.3)', margin:'0 8px' }}>·</span>
           <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:'12px', color:'#a8a49d' }}>{board.title}</span>
-          <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:'10px', color:'#ef4444', background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.2)', padding:'2px 8px', borderRadius:'10px' }}>// read-only</span>
+          <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:'10px', color:'#ef4444', background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.2)', padding:'2px 8px', borderRadius:'10px' }}>read-only</span>
         </div>
       </div>
 

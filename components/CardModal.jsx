@@ -86,7 +86,7 @@ export default function CardModal({ card, board, user, onClose, onUpdate, onDele
           {/* Main */}
           <div style={{ flex:1, padding:'28px 22px 28px 28px', borderRight:'1px solid var(--bd)', minWidth:0 }}>
             <div style={{ fontFamily:'var(--fm)', fontSize:'11px', color:'var(--faint)', marginBottom:'10px' }}>
-              // In: {colTitle}
+              In: {colTitle}
             </div>
             <input
               value={title}

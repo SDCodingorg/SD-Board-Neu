@@ -86,9 +86,18 @@ export default function AuthForm() {
             </button>
           </form>
 
-          {/* Google */}
+          {/* Social login */}
           <div style={{ marginTop:'16px', textAlign:'center' }}>
-            <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', marginBottom:'10px' }}>// oder</div>
+            <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', marginBottom:'10px' }}>oder</div>
+            <button onClick={() => signIn('discord', { callbackUrl:'/' })} style={{
+              width:'100%', padding:'10px', background:'var(--em)',
+              border:'1px solid rgba(88,101,242,.45)', borderRadius:'6px',
+              color:'#fff', fontWeight:700, fontSize:'13px',
+              display:'flex', alignItems:'center', justifyContent:'center', gap:'8px',
+              transition:'all .15s', marginBottom:'8px',
+            }}>
+              Mit Discord anmelden
+            </button>
             <button onClick={() => signIn('google', { callbackUrl:'/' })} style={{
               width:'100%', padding:'10px', background:'var(--ink3)',
               border:'1px solid var(--bd2)', borderRadius:'6px',
