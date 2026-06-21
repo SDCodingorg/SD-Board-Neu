@@ -7,7 +7,6 @@ const PRIORITIES = {
   medium: { color:'#eab308', label:'Mittel' },
   low:    { color:'#22c55e', label:'Niedrig'},
 }
-const LABELS = ['dev','design','bug','docs','qa','ux']
 const COVERS = ['','#5865f2','#7c3aed','#db2777','#dc2626','#ea580c','#ca8a04','#16a34a','#0891b2','#2563eb','#059669','#0f172a','#374151']
 
 const S = {
@@ -16,7 +15,15 @@ const S = {
   btn: { width:'100%', padding:'8px 12px', background:'var(--ink4)', border:'1px solid var(--bd2)', borderRadius:'5px', color:'var(--dim)', fontFamily:'var(--fb)', fontSize:'13px', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:'8px', transition:'all .15s' },
 }
 
-export default function CardModal({ card, board, user, onClose, onUpdate, onDelete, onAddComment, onUpdateChecklist }) {
+function hexToRgba(hex, alpha) {
+  const value = /^#[0-9a-fA-F]{6}$/.test(hex || '') ? hex.slice(1) : '5865f2'
+  const r = parseInt(value.slice(0, 2), 16)
+  const g = parseInt(value.slice(2, 4), 16)
+  const b = parseInt(value.slice(4, 6), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
+export default function CardModal({ card, board, user, labelDefinitions = [], onClose, onUpdate, onDelete, onAddComment, onUpdateChecklist }) {
   const toast = useToast()
   const [title,    setTitle]    = useState(card.title)
   const [desc,     setDesc]     = useState(card.description || '')
@@ -82,9 +89,9 @@ export default function CardModal({ card, board, user, onClose, onUpdate, onDele
       <div className="modal-box">
         {/* Header */}
         {cover && <div style={{ height:'6px', background:cover, borderRadius:'6px 6px 0 0' }} />}
-        <div style={{ display:'flex', minHeight:0 }}>
+        <div style={{ display:'flex', minHeight:0, height:'100%' }}>
           {/* Main */}
-          <div style={{ flex:1, padding:'28px 22px 28px 28px', borderRight:'1px solid var(--bd)', minWidth:0 }}>
+          <div style={{ flex:1, padding:'28px 22px 28px 28px', borderRight:'1px solid var(--bd)', minWidth:0, overflowY:'auto' }}>
             <div style={{ fontFamily:'var(--fm)', fontSize:'11px', color:'var(--faint)', marginBottom:'10px' }}>
               In: {colTitle}
             </div>
@@ -109,7 +116,7 @@ export default function CardModal({ card, board, user, onClose, onUpdate, onDele
               onChange={e => setDesc(e.target.value)}
               onBlur={() => save('description', desc)}
               placeholder="Beschreibung hinzufügen..."
-              style={{ ...S.inp, minHeight:'90px', resize:'vertical', marginBottom:'20px' }}
+              style={{ ...S.inp, minHeight:'170px', maxHeight:'min(55vh, 520px)', resize:'vertical', marginBottom:'20px', lineHeight:1.45 }}
             />
 
             {/* Checklists */}
@@ -225,13 +232,18 @@ export default function CardModal({ card, board, user, onClose, onUpdate, onDele
             <div>
               <div style={S.sec}>— Labels</div>
               <div style={{ display:'flex', flexWrap:'wrap', gap:'5px' }}>
-                {LABELS.map(l => (
-                  <button key={l} onClick={() => toggleLabel(l)} style={{
-                    fontFamily:'var(--fm)', fontSize:'10px', padding:'3px 8px', borderRadius:'3px', cursor:'pointer', border:'none',
-                    background: labels.includes(l) ? 'rgba(88,101,242,.3)' : 'var(--ink4)',
-                    color: labels.includes(l) ? '#9da5f3' : 'var(--faint)',
+                {labelDefinitions.map(label => (
+                  <button key={label.id || label.name} onClick={() => toggleLabel(label.name)} style={{
+                    display:'flex', alignItems:'center', gap:'5px',
+                    fontFamily:'var(--fm)', fontSize:'10px', padding:'3px 8px', borderRadius:'3px', cursor:'pointer',
+                    border: labels.includes(label.name) ? `1px solid ${hexToRgba(label.color, .55)}` : '1px solid var(--bd2)',
+                    background: labels.includes(label.name) ? hexToRgba(label.color, .20) : 'var(--ink4)',
+                    color: labels.includes(label.name) ? label.color : 'var(--faint)',
                     transition:'all .15s',
-                  }}>{l}</button>
+                  }}>
+                    <span style={{ width:'8px', height:'8px', borderRadius:'50%', background:label.color }} />
+                    {label.name}
+                  </button>
                 ))}
               </div>
             </div>

@@ -2,11 +2,13 @@
 import Link from 'next/link'
 import { signOut } from 'next-auth/react'
 import { useTheme } from '@/context/ThemeContext'
+import ChangelogModal from './ChangelogModal'
 
 export default function Navbar({ user }) {
   const { dark, toggle } = useTheme()
 
   return (
+    <>
     <nav style={{
       height:'64px', display:'flex', alignItems:'center', justifyContent:'space-between',
       padding:'0 28px', borderBottom:'1px solid var(--bd2)',
@@ -52,5 +54,7 @@ export default function Navbar({ user }) {
         </button>
       </div>
     </nav>
+    <ChangelogModal user={user} />
+    </>
   )
 }

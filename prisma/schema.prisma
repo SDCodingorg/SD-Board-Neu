@@ -68,7 +68,20 @@ model Board {
   members  BoardMember[]
   columns  Column[]
   cards    Card[]
+  labels   BoardLabel[]
   activities Activity[]
+}
+
+model BoardLabel {
+  id      String @id @default(cuid())
+  name    String
+  color   String @default("#5865f2")
+  order   Int    @default(0)
+  boardId String
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, name])
 }
 
 model BoardMember {
@@ -87,6 +100,7 @@ model Column {
   id       String @id @default(cuid())
   title    String
   order    Int    @default(0)
+  width    Int    @default(300)
   boardId  String
 
   board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)

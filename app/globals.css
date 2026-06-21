@@ -94,7 +94,10 @@ button { cursor: pointer; font-family: var(--fb); }
   background: var(--ink3);
   border: 1px solid var(--bd2);
   border-radius: var(--radius);
-  width: 100%; max-width: 960px;
+  width: 960px; max-width: calc(100vw - 32px);
+  min-width: min(720px, calc(100vw - 32px));
+  min-height: 520px; max-height: calc(100vh - 64px);
+  resize: both; overflow: auto;
   box-shadow: 0 40px 100px rgba(0,0,0,.6);
   animation: pop .2s cubic-bezier(.34,1.4,.64,1);
 }

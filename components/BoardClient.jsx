@@ -5,15 +5,16 @@ import {
   closestCorners, useDroppable
 } from '@dnd-kit/core'
 import {
-  SortableContext, verticalListSortingStrategy,
+  SortableContext, horizontalListSortingStrategy, verticalListSortingStrategy,
   useSortable, arrayMove
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/context/ToastContext'
 import {
-  addCard, moveCard, deleteBoard, addColumn, deleteColumn, renameColumn,
-  addComment, updateCard, deleteCard, toggleShare, updateChecklist,
+  addCard, importCards, moveCard, deleteBoard, addColumn, deleteColumn, renameColumn, reorderColumns,
+  updateColumnWidth, addComment, updateCard, deleteCard, toggleShare, updateChecklist,
+  createBoardLabel, updateBoardLabel, deleteBoardLabel,
   addBoardMember, updateBoardMemberRole, removeBoardMember
 } from '@/lib/actions/boards'
 import CardModal from './CardModal'
@@ -23,7 +24,95 @@ const PRIORITIES = {
   medium: { color:'#eab308', bg:'rgba(234,179,8,.15)',   border:'rgba(234,179,8,.3)',  label:'Medium' },
   low:    { color:'#22c55e', bg:'rgba(34,197,94,.15)',   border:'rgba(34,197,94,.3)',  label:'Low'    },
 }
-const LABELS = ['dev','design','bug','docs','qa','ux']
+const DEFAULT_LABEL_DEFS = [
+  { id:'default-dev', name:'dev', color:'#5865f2' },
+  { id:'default-design', name:'design', color:'#a855f7' },
+  { id:'default-bug', name:'bug', color:'#ef4444' },
+  { id:'default-docs', name:'docs', color:'#38bdf8' },
+  { id:'default-qa', name:'qa', color:'#22c55e' },
+  { id:'default-ux', name:'ux', color:'#eab308' },
+]
+const MIN_COLUMN_WIDTH = 220
+const MAX_COLUMN_WIDTH = 460
+
+const defaultFilters = {
+  keyword: '',
+  mine: false,
+  unassigned: false,
+  overdue: false,
+  dueToday: false,
+  dueWeek: false,
+  noDue: false,
+  priorities: [],
+  labels: [],
+  columns: [],
+}
+
+function parseDeadline(value) {
+  if (!value) return null
+  const date = new Date(value + 'T00:00:00')
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function startOfToday() {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+
+function addDays(date, days) {
+  const next = new Date(date)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+function hexToRgba(hex, alpha) {
+  const value = /^#[0-9a-fA-F]{6}$/.test(hex || '') ? hex.slice(1) : '5865f2'
+  const r = parseInt(value.slice(0, 2), 16)
+  const g = parseInt(value.slice(2, 4), 16)
+  const b = parseInt(value.slice(4, 6), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
+function parseImportedCards(input) {
+  const text = input.trim()
+  if (!text) return []
+
+  try {
+    const parsed = JSON.parse(text)
+    const cards = Array.isArray(parsed) ? parsed : parsed.cards
+    if (!Array.isArray(cards)) throw new Error('JSON braucht ein Array oder { "cards": [...] }')
+    return cards.map(card => ({
+      title: String(card.title || '').trim(),
+      description: String(card.description || '').trim(),
+      priority: ['high', 'medium', 'low'].includes(card.priority) ? card.priority : 'medium',
+      labels: Array.isArray(card.labels) ? card.labels : String(card.labels || '').split(',').map(label => label.trim()).filter(Boolean),
+      deadline: card.deadline || card.dueDate || '',
+      startDate: card.startDate || '',
+      column: card.column || card.columnTitle || '',
+      checklists: Array.isArray(card.checklists) ? card.checklists : [],
+    })).filter(card => card.title)
+  } catch (error) {
+    if (text.startsWith('{') || text.startsWith('[')) throw error
+  }
+
+  return text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => line.replace(/^[-*•]\s*/, '').replace(/^\[[ xX]\]\s*/, '').trim())
+    .filter(Boolean)
+    .map(line => {
+      const parts = line.split('|').map(part => part.trim())
+      return {
+        title: parts[0],
+        priority: ['high', 'medium', 'low'].includes(parts[1]) ? parts[1] : 'medium',
+        labels: parts[2] ? parts[2].split(',').map(label => label.trim()).filter(Boolean) : [],
+        deadline: parts[3] || '',
+        description: '',
+      }
+    })
+}
 
 export default function BoardClient({ board: initialBoard, user }) {
   const router = useRouter()
@@ -37,6 +126,9 @@ export default function BoardClient({ board: initialBoard, user }) {
   const [inviteRole, setInviteRole] = useState('editor')
   const [inviteError, setInviteError] = useState('')
   const [contextMenu, setContextMenu] = useState(null)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [filters, setFilters] = useState(defaultFilters)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
@@ -46,9 +138,109 @@ export default function BoardClient({ board: initialBoard, user }) {
   const canWrite = ['owner', 'admin', 'editor'].includes(currentRole)
   const canAdmin = ['owner', 'admin'].includes(currentRole)
   const isOwner = currentRole === 'owner'
+  const today = startOfToday()
+  const weekEnd = addDays(today, 7)
+  const longOverdueCutoff = addDays(today, -7)
+  const boardLabelDefs = board.labels?.length ? board.labels : DEFAULT_LABEL_DEFS
+  const unknownLabelDefs = board.cards
+    .flatMap(card => card.labels || [])
+    .filter((label, index, labels) => labels.indexOf(label) === index)
+    .filter(label => !boardLabelDefs.some(def => def.name === label))
+    .map(label => ({ id:`unknown-${label}`, name:label, color:'#5865f2' }))
+  const labelDefinitions = [...boardLabelDefs, ...unknownLabelDefs]
+  const hasFilters = Object.entries(filters).some(([, value]) => Array.isArray(value) ? value.length > 0 : Boolean(value))
+  const activeFilterCount = Object.entries(filters).reduce((count, [, value]) => count + (Array.isArray(value) ? value.length : value ? 1 : 0), 0)
+
+  function cardDeadline(card) {
+    return parseDeadline(card.deadline)
+  }
+
+  function isOverdue(card) {
+    const deadline = cardDeadline(card)
+    return deadline ? deadline < today : false
+  }
+
+  function isDueToday(card) {
+    const deadline = cardDeadline(card)
+    return deadline ? deadline.getTime() === today.getTime() : false
+  }
+
+  function isDueThisWeek(card) {
+    const deadline = cardDeadline(card)
+    return deadline ? deadline >= today && deadline <= weekEnd : false
+  }
+
+  function isLongOverdue(card) {
+    const deadline = cardDeadline(card)
+    return deadline ? deadline < longOverdueCutoff : false
+  }
+
+  function isMine(card) {
+    return card.assignees?.some(a => a.userId === user?.id)
+  }
+
+  function matchesFilters(card) {
+    const keyword = filters.keyword.trim().toLowerCase()
+    if (keyword) {
+      const columnTitle = board.columns.find(col => col.id === card.columnId)?.title || ''
+      const haystack = [
+        card.title,
+        card.description,
+        card.priority,
+        columnTitle,
+        ...(card.labels || []),
+        ...(card.assignees || []).map(a => a.name),
+      ].filter(Boolean).join(' ').toLowerCase()
+      if (!haystack.includes(keyword)) return false
+    }
+
+    const hasMemberFilter = filters.mine || filters.unassigned
+    if (hasMemberFilter) {
+      const memberMatch = (filters.mine && isMine(card)) || (filters.unassigned && !card.assignees?.length)
+      if (!memberMatch) return false
+    }
+
+    const hasDueFilter = filters.overdue || filters.dueToday || filters.dueWeek || filters.noDue
+    if (hasDueFilter) {
+      const dueMatch =
+        (filters.overdue && isOverdue(card)) ||
+        (filters.dueToday && isDueToday(card)) ||
+        (filters.dueWeek && isDueThisWeek(card)) ||
+        (filters.noDue && !card.deadline)
+      if (!dueMatch) return false
+    }
+    if (filters.priorities.length && !filters.priorities.includes(card.priority || 'medium')) return false
+    if (filters.labels.length && !filters.labels.some(label => (card.labels || []).includes(label))) return false
+    if (filters.columns.length && !filters.columns.includes(card.columnId)) return false
+    return true
+  }
+
+  const visibleCards = hasFilters ? board.cards.filter(matchesFilters) : board.cards
+  const reminderStats = {
+    longOverdue: board.cards.filter(isLongOverdue),
+    overdue: board.cards.filter(card => isOverdue(card) && !isLongOverdue(card)),
+    dueToday: board.cards.filter(isDueToday),
+    high: board.cards.filter(card => card.priority === 'high'),
+    mine: board.cards.filter(isMine),
+  }
+
+  function setFilter(key, value) {
+    setFilters(current => ({ ...current, [key]: value }))
+  }
+
+  function toggleFilterValue(key, value) {
+    setFilters(current => {
+      const values = current[key] || []
+      return { ...current, [key]: values.includes(value) ? values.filter(item => item !== value) : [...values, value] }
+    })
+  }
+
+  function activateQuickFilter(key) {
+    setFilters(current => ({ ...current, [key]: true }))
+  }
 
   function cardsByCol(colId) {
-    return board.cards.filter(c => c.columnId === colId).sort((a,b) => a.order - b.order)
+    return visibleCards.filter(c => c.columnId === colId).sort((a,b) => a.order - b.order)
   }
 
   async function handleMoveCard(cardId, toColId, order) {
@@ -61,10 +253,30 @@ export default function BoardClient({ board: initialBoard, user }) {
     router.refresh()
   }
 
-  function handleDragEnd(event) {
+  async function handleDragEnd(event) {
     const { active, over } = event
     setActiveId(null)
     if (!over || active.id === over.id) return
+
+    const activeColumn = board.columns.find(c => c.id === active.id)
+    if (activeColumn) {
+      if (!canWrite) return toast('Du hast nur Leserechte')
+
+      const overColumn = board.columns.find(c => c.id === over.id)
+      const overCard = board.cards.find(c => c.id === over.id)
+      const overColumnId = overColumn?.id || overCard?.columnId
+      if (!overColumnId || active.id === overColumnId) return
+
+      const oldIndex = board.columns.findIndex(c => c.id === active.id)
+      const newIndex = board.columns.findIndex(c => c.id === overColumnId)
+      if (oldIndex < 0 || newIndex < 0) return
+
+      const nextColumns = arrayMove(board.columns, oldIndex, newIndex).map((col, index) => ({ ...col, order: index }))
+      setBoard(b => ({ ...b, columns: nextColumns }))
+      await reorderColumns(board.id, nextColumns.map(col => col.id))
+      router.refresh()
+      return
+    }
 
     const activeCard = board.cards.find(c => c.id === active.id)
     if (!activeCard) return
@@ -167,6 +379,64 @@ export default function BoardClient({ board: initialBoard, user }) {
     router.refresh()
   }
 
+  function handleResizeColumn(columnId, width) {
+    if (!canWrite) return
+    const nextWidth = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(width)))
+    setBoard(b => ({
+      ...b,
+      columns: b.columns.map(col => col.id === columnId ? { ...col, width: nextWidth } : col)
+    }))
+  }
+
+  async function handleSaveColumnWidth(columnId, width) {
+    if (!canWrite) return
+    const nextWidth = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(width)))
+    await updateColumnWidth(board.id, columnId, nextWidth)
+    router.refresh()
+  }
+
+  async function handleCreateLabel(data) {
+    if (!canWrite) return toast('Du hast nur Leserechte')
+    try {
+      await createBoardLabel(board.id, data)
+      toast('Label erstellt')
+      router.refresh()
+    } catch (error) {
+      toast(error.message || 'Label konnte nicht erstellt werden')
+    }
+  }
+
+  async function handleUpdateLabel(labelId, data) {
+    if (!canWrite) return toast('Du hast nur Leserechte')
+    try {
+      await updateBoardLabel(board.id, labelId, data)
+      toast('Label aktualisiert')
+      router.refresh()
+    } catch (error) {
+      toast(error.message || 'Label konnte nicht aktualisiert werden')
+    }
+  }
+
+  async function handleDeleteLabel(labelId) {
+    if (!canWrite) return toast('Du hast nur Leserechte')
+    if (!confirm('Label wirklich loeschen? Es wird auch von allen Karten entfernt.')) return
+    try {
+      await deleteBoardLabel(board.id, labelId)
+      toast('Label geloescht')
+      router.refresh()
+    } catch (error) {
+      toast(error.message || 'Label konnte nicht geloescht werden')
+    }
+  }
+
+  async function handleImportCards(defaultColumnId, parsedCards) {
+    if (!canWrite) return toast('Du hast nur Leserechte')
+    const result = await importCards(board.id, defaultColumnId, parsedCards)
+    toast(`${result.count} Karten importiert`)
+    setImportOpen(false)
+    router.refresh()
+  }
+
   const viewBtn = (v, label) => (
     <button onClick={() => setView(v)} style={{
       fontFamily:'var(--fm)', fontSize:'11px', letterSpacing:'1px',
@@ -179,6 +449,7 @@ export default function BoardClient({ board: initialBoard, user }) {
   )
 
   const activeCard = board.cards.find(c => c.id === activeId)
+  const activeColumn = board.columns.find(c => c.id === activeId)
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 64px)' }} onClick={() => setContextMenu(null)}>
@@ -201,6 +472,28 @@ export default function BoardClient({ board: initialBoard, user }) {
           {viewBtn('timeline','→ Timeline')}
 
           <div style={{ width:'1px', height:'20px', background:'var(--bd2)', margin:'0 4px' }} />
+
+          <button onClick={() => setFiltersOpen(v => !v)} style={{
+            fontFamily:'var(--fm)', fontSize:'11px', letterSpacing:'1px', textTransform:'uppercase',
+            padding:'6px 12px', borderRadius:'5px', cursor:'pointer', transition:'all .15s',
+            background: filtersOpen || hasFilters ? 'rgba(88,101,242,.2)' : 'transparent',
+            color: filtersOpen || hasFilters ? '#9da5f3' : 'var(--dim)',
+            border: filtersOpen || hasFilters ? '1px solid rgba(88,101,242,.4)' : '1px solid var(--bd)',
+          }}>
+            Filter{activeFilterCount ? ` ${activeFilterCount}` : ''}
+          </button>
+
+          {canWrite && (
+            <button onClick={() => setImportOpen(true)} style={{
+              fontFamily:'var(--fm)', fontSize:'11px', letterSpacing:'1px', textTransform:'uppercase',
+              padding:'6px 12px', borderRadius:'5px', cursor:'pointer', transition:'all .15s',
+              background: importOpen ? 'rgba(88,101,242,.2)' : 'transparent',
+              color: importOpen ? '#9da5f3' : 'var(--dim)',
+              border: importOpen ? '1px solid rgba(88,101,242,.4)' : '1px solid var(--bd)',
+            }}>
+              Import
+            </button>
+          )}
 
           <button onClick={handleToggleShare} style={{
             fontFamily:'var(--fm)', fontSize:'11px', letterSpacing:'1px', textTransform:'uppercase',
@@ -296,27 +589,40 @@ export default function BoardClient({ board: initialBoard, user }) {
         </div>
       )}
 
+      <ReminderBar
+        stats={reminderStats}
+        activeFilters={filters}
+        onActivate={activateQuickFilter}
+        onPriority={() => toggleFilterValue('priorities', 'high')}
+        onMine={() => activateQuickFilter('mine')}
+      />
+
       {/* Board Content */}
       {view === 'kanban' && (
         <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={e => setActiveId(e.active.id)} onDragEnd={handleDragEnd}>
           <div style={{ flex:1, display:'flex', overflowX:'auto', padding:'16px', gap:'12px', alignItems:'flex-start' }}>
-            {board.columns.map(col => (
-              <KanbanColumn
-                key={col.id}
-                col={col}
-                cards={cardsByCol(col.id)}
-                boardId={board.id}
-                onAddCard={handleAddCard}
-                onOpenCard={setOpenCardId}
-                onOpenMenu={openCardMenu}
-                canWrite={canWrite}
-                onDeleteCol={() => {
-                  if (!canWrite) return
-                  if (!confirm(`Spalte "${col.title}" wirklich loeschen? Alle Karten darin werden ebenfalls geloescht.`)) return
-                  deleteColumn(board.id, col.id).then(() => router.refresh())
-                }}
-              />
-            ))}
+            <SortableContext items={board.columns.map(col => col.id)} strategy={horizontalListSortingStrategy}>
+              {board.columns.map(col => (
+                <KanbanColumn
+                  key={col.id}
+                  col={col}
+                  cards={cardsByCol(col.id)}
+                  boardId={board.id}
+                  labelDefinitions={labelDefinitions}
+                  onAddCard={handleAddCard}
+                  onOpenCard={setOpenCardId}
+                  onOpenMenu={openCardMenu}
+                  onResizeColumn={handleResizeColumn}
+                  onSaveColumnWidth={handleSaveColumnWidth}
+                  canWrite={canWrite}
+                  onDeleteCol={() => {
+                    if (!canWrite) return
+                    if (!confirm(`Spalte "${col.title}" wirklich loeschen? Alle Karten darin werden ebenfalls geloescht.`)) return
+                    deleteColumn(board.id, col.id).then(() => router.refresh())
+                  }}
+                />
+              ))}
+            </SortableContext>
 
             {/* Add Column */}
             {canWrite && <button onClick={async () => {
@@ -349,6 +655,20 @@ export default function BoardClient({ board: initialBoard, user }) {
                 <div style={{ fontFamily:'var(--fb)', fontSize:'14px', fontWeight:600, color:'var(--td)' }}>{activeCard.title}</div>
               </div>
             )}
+            {!activeCard && activeColumn && (
+              <div style={{
+                background:'var(--ink2)', border:'1px solid var(--bd2)',
+                borderRadius:'8px', padding:'13px 14px', width:'var(--col-w)',
+                opacity:.9, transform:'rotate(1deg)',
+                boxShadow:'0 16px 40px rgba(0,0,0,.5)',
+              }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                  <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)' }}>#</span>
+                  <span style={{ fontFamily:'var(--fb)', fontSize:'14px', fontWeight:700, color:'var(--td)' }}>{activeColumn.title}</span>
+                  <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', background:'var(--ink3)', border:'1px solid var(--bd)', borderRadius:'10px', padding:'1px 7px' }}>{cardsByCol(activeColumn.id).length}</span>
+                </div>
+              </div>
+            )}
           </DragOverlay>
         </DndContext>
       )}
@@ -359,12 +679,39 @@ export default function BoardClient({ board: initialBoard, user }) {
         </div>
       )}
 
+      {filtersOpen && (
+        <FilterPanel
+          filters={filters}
+          columns={board.columns}
+          labels={labelDefinitions}
+          visibleCount={visibleCards.length}
+          totalCount={board.cards.length}
+          canWrite={canWrite}
+          onClose={() => setFiltersOpen(false)}
+          onSetFilter={setFilter}
+          onToggleValue={toggleFilterValue}
+          onReset={() => setFilters(defaultFilters)}
+          onCreateLabel={handleCreateLabel}
+          onUpdateLabel={handleUpdateLabel}
+          onDeleteLabel={handleDeleteLabel}
+        />
+      )}
+
+      {importOpen && (
+        <ImportCardsPanel
+          columns={board.columns}
+          onClose={() => setImportOpen(false)}
+          onImport={handleImportCards}
+        />
+      )}
+
       {/* Card Modal */}
       {openCard && (
         <CardModal
           card={openCard}
           board={board}
           user={user}
+          labelDefinitions={labelDefinitions}
           onClose={() => setOpenCardId(null)}
           onUpdate={async (cardId, data) => {
             if (!canWrite) return toast('Du hast nur Leserechte')
@@ -412,6 +759,7 @@ export default function BoardClient({ board: initialBoard, user }) {
             const next = labels.includes(label) ? labels.filter(l => l !== label) : [...labels, label]
             quickUpdateCard(card.id, { labels: next })
           }}
+          labelDefinitions={labelDefinitions}
           onDelete={() => quickDeleteCard(contextMenu.cardId)}
         />
       )}
@@ -420,10 +768,382 @@ export default function BoardClient({ board: initialBoard, user }) {
 }
 
 // ── KanbanColumn ─────────────────────────────────────────────
-function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onOpenMenu, onDeleteCol, canWrite }) {
+function ReminderBar({ stats, activeFilters, onActivate, onPriority, onMine }) {
+  const items = [
+    { key:'longOverdue', label:'Laengst ueberfaellig', count:stats.longOverdue.length, active:activeFilters.overdue, onClick:() => onActivate('overdue'), tone:'danger' },
+    { key:'overdue', label:'Ueberfaellig', count:stats.overdue.length, active:activeFilters.overdue, onClick:() => onActivate('overdue'), tone:'danger' },
+    { key:'dueToday', label:'Heute faellig', count:stats.dueToday.length, active:activeFilters.dueToday, onClick:() => onActivate('dueToday'), tone:'warn' },
+    { key:'high', label:'High Prio', count:stats.high.length, active:activeFilters.priorities.includes('high'), onClick:onPriority, tone:'danger' },
+    { key:'mine', label:'Meine Karten', count:stats.mine.length, active:activeFilters.mine, onClick:onMine, tone:'info' },
+  ].filter(item => item.count > 0)
+
+  if (!items.length) return null
+
+  return (
+    <div style={{
+      flexShrink:0, display:'flex', alignItems:'center', gap:'8px', padding:'9px 20px',
+      background:'var(--ink)', borderBottom:'1px solid var(--bd2)', overflowX:'auto',
+    }}>
+      <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', letterSpacing:'1px', textTransform:'uppercase', flexShrink:0 }}>
+        Aufmerksamkeit
+      </span>
+      {items.map(item => (
+        <button
+          key={item.key}
+          type="button"
+          onClick={item.onClick}
+          style={{
+            flexShrink:0, display:'flex', alignItems:'center', gap:'7px',
+            padding:'6px 10px', borderRadius:'5px', cursor:'pointer',
+            border:item.active ? '1px solid rgba(88,101,242,.55)' : '1px solid var(--bd2)',
+            background:item.active ? 'rgba(88,101,242,.18)' : 'var(--ink2)',
+            color:item.tone === 'danger' ? '#f87171' : item.tone === 'warn' ? '#facc15' : '#9da5f3',
+            fontFamily:'var(--fm)', fontSize:'11px',
+          }}
+        >
+          <span>{item.label}</span>
+          <strong style={{ color:'var(--td)' }}>{item.count}</strong>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function FilterPanel({ filters, columns, labels, visibleCount, totalCount, canWrite, onClose, onSetFilter, onToggleValue, onReset, onCreateLabel, onUpdateLabel, onDeleteLabel }) {
+  const [labelName, setLabelName] = useState('')
+  const [labelColor, setLabelColor] = useState('#5865f2')
+  const [editingLabelId, setEditingLabelId] = useState(null)
+  const [editingName, setEditingName] = useState('')
+  const [editingColor, setEditingColor] = useState('#5865f2')
+  const rowStyle = {
+    display:'flex', alignItems:'center', gap:'10px', width:'100%',
+    padding:'7px 0', color:'var(--dim)', fontFamily:'var(--fb)', fontSize:'13px',
+  }
+  const sectionStyle = {
+    margin:'18px 0 7px', fontFamily:'var(--fm)', fontSize:'10px',
+    color:'var(--faint)', letterSpacing:'1px', textTransform:'uppercase',
+  }
+
+  const CheckRow = ({ checked, label, onClick, color }) => (
+    <button type="button" onClick={onClick} style={{ ...rowStyle, background:'transparent', border:'none', cursor:'pointer', textAlign:'left' }}>
+      <span style={{
+        width:'15px', height:'15px', borderRadius:'3px', flexShrink:0,
+        border:checked ? '1px solid rgba(88,101,242,.8)' : '1px solid var(--bd2)',
+        background:checked ? 'rgba(88,101,242,.35)' : 'transparent',
+      }} />
+      {color && <span style={{ width:'14px', height:'14px', borderRadius:'50%', background:color, flexShrink:0 }} />}
+      <span style={{ color:checked ? 'var(--td)' : 'var(--dim)' }}>{label}</span>
+    </button>
+  )
+
+  async function submitLabel(e) {
+    e.preventDefault()
+    if (!labelName.trim()) return
+    await onCreateLabel({ name: labelName, color: labelColor })
+    setLabelName('')
+    setLabelColor('#5865f2')
+  }
+
+  function startEdit(label) {
+    setEditingLabelId(label.id)
+    setEditingName(label.name)
+    setEditingColor(label.color)
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault()
+    if (!editingLabelId || !editingName.trim()) return
+    await onUpdateLabel(editingLabelId, { name: editingName, color: editingColor })
+    setEditingLabelId(null)
+    setEditingName('')
+    setEditingColor('#5865f2')
+  }
+
+  return (
+    <aside
+      onClick={e => e.stopPropagation()}
+      style={{
+        position:'fixed', top:'64px', right:0, bottom:0, width:'360px', zIndex:450,
+        background:'var(--ink2)', borderLeft:'1px solid var(--bd2)',
+        boxShadow:'-18px 0 50px rgba(0,0,0,.35)', padding:'18px',
+        overflowY:'auto',
+      }}
+    >
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px' }}>
+        <div>
+          <div style={{ fontFamily:'var(--fd)', fontSize:'22px', letterSpacing:'1px', color:'var(--td)' }}>Filtern</div>
+          <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)' }}>{visibleCount}/{totalCount} Karten sichtbar</div>
+        </div>
+        <button onClick={onClose} style={{ background:'transparent', border:'none', color:'var(--faint)', fontSize:'18px', cursor:'pointer' }}>x</button>
+      </div>
+
+      <div style={sectionStyle}>Stichwort</div>
+      <input
+        autoFocus
+        value={filters.keyword}
+        onChange={e => onSetFilter('keyword', e.target.value)}
+        placeholder="Karten, Labels, Mitglieder..."
+        style={{
+          width:'100%', padding:'10px 11px', borderRadius:'5px',
+          border:'1px solid rgba(88,101,242,.5)', background:'var(--ink3)',
+          color:'var(--td)', outline:'none',
+        }}
+      />
+
+      <div style={sectionStyle}>Mitglieder</div>
+      <CheckRow checked={filters.unassigned} label="Keine Mitglieder" onClick={() => onSetFilter('unassigned', !filters.unassigned)} />
+      <CheckRow checked={filters.mine} label="Karten, die mir zugewiesen sind" onClick={() => onSetFilter('mine', !filters.mine)} />
+
+      <div style={sectionStyle}>Faelligkeit</div>
+      <CheckRow checked={filters.noDue} label="Ohne Faelligkeitsdatum" onClick={() => onSetFilter('noDue', !filters.noDue)} />
+      <CheckRow checked={filters.overdue} label="Ueberfaellig" onClick={() => onSetFilter('overdue', !filters.overdue)} color="#ef4444" />
+      <CheckRow checked={filters.dueToday} label="Heute faellig" onClick={() => onSetFilter('dueToday', !filters.dueToday)} color="#eab308" />
+      <CheckRow checked={filters.dueWeek} label="Innerhalb der naechsten Woche" onClick={() => onSetFilter('dueWeek', !filters.dueWeek)} color="#8b949e" />
+
+      <div style={sectionStyle}>Prioritaet</div>
+      {Object.entries(PRIORITIES).map(([key, priority]) => (
+        <CheckRow key={key} checked={filters.priorities.includes(key)} label={priority.label} color={priority.color} onClick={() => onToggleValue('priorities', key)} />
+      ))}
+
+      <div style={sectionStyle}>Labels</div>
+      {labels.map(label => (
+        <CheckRow key={label.id || label.name} checked={filters.labels.includes(label.name)} label={label.name} color={label.color} onClick={() => onToggleValue('labels', label.name)} />
+      ))}
+
+      {canWrite && (
+        <div style={{ marginTop:'10px', padding:'10px', border:'1px solid var(--bd2)', borderRadius:'6px', background:'var(--ink3)' }}>
+          <form onSubmit={submitLabel} style={{ display:'grid', gridTemplateColumns:'1fr 34px 34px', gap:'7px', alignItems:'center' }}>
+            <input
+              value={labelName}
+              onChange={e => setLabelName(e.target.value)}
+              placeholder="Neues Label"
+              style={{
+                minWidth:0, padding:'8px 9px', borderRadius:'5px',
+                border:'1px solid var(--bd2)', background:'var(--ink2)', color:'var(--td)',
+              }}
+            />
+            <input
+              type="color"
+              value={labelColor}
+              onChange={e => setLabelColor(e.target.value)}
+              title="Farbe"
+              style={{ width:'34px', height:'34px', padding:'2px', border:'1px solid var(--bd2)', borderRadius:'5px', background:'var(--ink2)' }}
+            />
+            <button type="submit" title="Label erstellen" style={{
+              width:'34px', height:'34px', border:'1px solid var(--bd2)', borderRadius:'5px',
+              background:'rgba(88,101,242,.25)', color:'#9da5f3', cursor:'pointer',
+            }}>+</button>
+          </form>
+
+          <div style={{ display:'flex', flexDirection:'column', gap:'7px', marginTop:'10px' }}>
+            {labels.filter(label => {
+              const id = String(label.id || '')
+              return !id.startsWith('unknown-') && !id.startsWith('default-')
+            }).map(label => (
+              editingLabelId === label.id ? (
+                <form key={label.id} onSubmit={saveEdit} style={{ display:'grid', gridTemplateColumns:'1fr 34px 34px', gap:'7px', alignItems:'center' }}>
+                  <input
+                    value={editingName}
+                    onChange={e => setEditingName(e.target.value)}
+                    style={{
+                      minWidth:0, padding:'7px 8px', borderRadius:'5px',
+                      border:'1px solid var(--bd2)', background:'var(--ink2)', color:'var(--td)',
+                    }}
+                  />
+                  <input
+                    type="color"
+                    value={editingColor}
+                    onChange={e => setEditingColor(e.target.value)}
+                    style={{ width:'34px', height:'32px', padding:'2px', border:'1px solid var(--bd2)', borderRadius:'5px', background:'var(--ink2)' }}
+                  />
+                  <button type="submit" title="Speichern" style={{ width:'34px', height:'32px', border:'1px solid var(--bd2)', borderRadius:'5px', background:'var(--ink2)', color:'var(--td)', cursor:'pointer' }}>OK</button>
+                </form>
+              ) : (
+                <div key={label.id} style={{ display:'grid', gridTemplateColumns:'14px 1fr 26px 26px', gap:'7px', alignItems:'center' }}>
+                  <span style={{ width:'14px', height:'14px', borderRadius:'50%', background:label.color }} />
+                  <span style={{ minWidth:0, color:'var(--dim)', fontFamily:'var(--fb)', fontSize:'12px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{label.name}</span>
+                  <button type="button" title="Bearbeiten" onClick={() => startEdit(label)} style={{ width:'26px', height:'26px', border:'1px solid var(--bd2)', borderRadius:'5px', background:'var(--ink2)', color:'var(--faint)', cursor:'pointer' }}>e</button>
+                  <button type="button" title="Loeschen" onClick={() => onDeleteLabel(label.id)} style={{ width:'26px', height:'26px', border:'1px solid rgba(239,68,68,.3)', borderRadius:'5px', background:'var(--ink2)', color:'#f87171', cursor:'pointer' }}>x</button>
+                </div>
+              )
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={sectionStyle}>Spalten</div>
+      {columns.map(column => (
+        <CheckRow key={column.id} checked={filters.columns.includes(column.id)} label={column.title} onClick={() => onToggleValue('columns', column.id)} />
+      ))}
+
+      <button
+        onClick={onReset}
+        style={{
+          width:'100%', marginTop:'18px', padding:'9px 11px', borderRadius:'5px',
+          border:'1px solid var(--bd2)', background:'var(--ink3)', color:'var(--dim)',
+          fontFamily:'var(--fb)', fontSize:'13px', cursor:'pointer',
+        }}
+      >
+        Filter zuruecksetzen
+      </button>
+    </aside>
+  )
+}
+
+function ImportCardsPanel({ columns, onClose, onImport }) {
+  const [targetColumnId, setTargetColumnId] = useState(columns[0]?.id || '')
+  const [rawInput, setRawInput] = useState('')
+  const [error, setError] = useState('')
+  const [importing, setImporting] = useState(false)
+
+  let previewCards = []
+  let parseError = ''
+  try {
+    previewCards = parseImportedCards(rawInput)
+  } catch (err) {
+    parseError = err.message || 'Import konnte nicht gelesen werden'
+  }
+
+  const example = `{
+  "cards": [
+    {
+      "title": "Login Flow testen",
+      "description": "Discord Login pruefen und Fehlerfaelle dokumentieren",
+      "priority": "high",
+      "labels": ["qa", "auth"],
+      "deadline": "2026-07-01",
+      "column": "In Arbeit",
+      "checklists": [
+        {
+          "title": "Testplan",
+          "items": [
+            "Discord Login mit bestehendem Account testen",
+            { "text": "Fehlerfall dokumentieren", "checked": false }
+          ]
+        }
+      ]
+    }
+  ]
+}`
+
+  async function submitImport(e) {
+    e.preventDefault()
+    setError('')
+    if (parseError) return setError(parseError)
+    if (!previewCards.length) return setError('Keine gueltigen Karten erkannt')
+    setImporting(true)
+    try {
+      await onImport(targetColumnId, previewCards)
+    } catch (err) {
+      setError(err.message || 'Import fehlgeschlagen')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  return (
+    <aside
+      onClick={e => e.stopPropagation()}
+      style={{
+        position:'fixed', top:'64px', right:0, bottom:0, width:'430px', zIndex:460,
+        background:'var(--ink2)', borderLeft:'1px solid var(--bd2)',
+        boxShadow:'-18px 0 50px rgba(0,0,0,.35)', padding:'18px',
+        overflowY:'auto',
+      }}
+    >
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px' }}>
+        <div>
+          <div style={{ fontFamily:'var(--fd)', fontSize:'22px', letterSpacing:'1px', color:'var(--td)' }}>Cards importieren</div>
+          <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)' }}>
+            JSON oder einfache Textliste einfuegen
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background:'transparent', border:'none', color:'var(--faint)', fontSize:'18px', cursor:'pointer' }}>x</button>
+      </div>
+
+      <form onSubmit={submitImport}>
+        <label style={importLabelStyle}>Zielspalte fuer Karten ohne Spalte</label>
+        <select value={targetColumnId} onChange={e => setTargetColumnId(e.target.value)} style={importInputStyle}>
+          {columns.map(column => <option key={column.id} value={column.id}>{column.title}</option>)}
+        </select>
+
+        <label style={{ ...importLabelStyle, marginTop:'14px' }}>Import-Text</label>
+        <textarea
+          value={rawInput}
+          onChange={e => setRawInput(e.target.value)}
+          placeholder="JSON oder Liste einfuegen..."
+          style={{ ...importInputStyle, minHeight:'240px', resize:'vertical', lineHeight:1.45, fontFamily:'var(--fm)', fontSize:'12px' }}
+        />
+
+        <div style={{ marginTop:'10px', padding:'10px', border:'1px solid var(--bd2)', borderRadius:'6px', background:'var(--ink3)' }}>
+          <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', letterSpacing:'1px', textTransform:'uppercase', marginBottom:'7px' }}>
+            Beispiel fuer KI-Prompt
+          </div>
+          <pre style={{ whiteSpace:'pre-wrap', fontFamily:'var(--fm)', fontSize:'10px', color:'var(--dim)', lineHeight:1.5 }}>
+{`Gib mir Aufgaben als JSON in genau diesem Format:
+${example}`}
+          </pre>
+        </div>
+
+        <div style={{ marginTop:'12px', fontFamily:'var(--fm)', fontSize:'11px', color:parseError || error ? '#f87171' : 'var(--faint)' }}>
+          {error || parseError || `${previewCards.length} Karten erkannt`}
+        </div>
+
+        {previewCards.length > 0 && !parseError && (
+          <div style={{ marginTop:'10px', maxHeight:'150px', overflowY:'auto', display:'flex', flexDirection:'column', gap:'6px' }}>
+            {previewCards.slice(0, 8).map((card, index) => (
+              <div key={`${card.title}-${index}`} style={{ padding:'7px 9px', border:'1px solid var(--bd2)', borderRadius:'5px', background:'var(--ink3)' }}>
+                <div style={{ fontFamily:'var(--fb)', fontSize:'12px', color:'var(--td)' }}>{card.title}</div>
+                <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)' }}>
+                  {card.priority} {card.labels?.length ? `· ${card.labels.join(', ')}` : ''} {card.deadline ? `· ${card.deadline}` : ''}
+                  {card.checklists?.length ? ` · ${card.checklists.length} Checkliste(n)` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={importing || !previewCards.length || Boolean(parseError)}
+          style={{
+            width:'100%', marginTop:'14px', padding:'10px 12px', borderRadius:'5px',
+            border:'1px solid rgba(88,101,242,.45)', background:'rgba(88,101,242,.35)',
+            color:'#fff', fontFamily:'var(--fb)', fontSize:'13px',
+            cursor:importing || !previewCards.length || parseError ? 'not-allowed' : 'pointer',
+            opacity:importing || !previewCards.length || parseError ? .55 : 1,
+          }}
+        >
+          {importing ? 'Importiere...' : `${previewCards.length || 0} Karten importieren`}
+        </button>
+      </form>
+    </aside>
+  )
+}
+
+const importLabelStyle = {
+  display:'block', fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)',
+  letterSpacing:'1px', textTransform:'uppercase', marginBottom:'7px',
+}
+
+const importInputStyle = {
+  width:'100%', padding:'9px 10px', borderRadius:'5px',
+  border:'1px solid var(--bd2)', background:'var(--ink3)', color:'var(--td)', outline:'none',
+}
+
+function KanbanColumn({ col, cards, boardId, labelDefinitions, onAddCard, onOpenCard, onResizeColumn, onSaveColumnWidth, onOpenMenu, onDeleteCol, canWrite }) {
   const [adding, setAdding] = useState(false)
   const [newTitle, setNewTitle] = useState('')
-  const { setNodeRef } = useDroppable({ id: col.id })
+  const columnWidth = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, col.width || 300))
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setColumnNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: col.id, data: { type:'column' }, disabled: !canWrite })
+  const { setNodeRef: setCardsNodeRef } = useDroppable({ id: col.id, data: { type:'column-drop' } })
 
   async function submitCard(e) {
     e.preventDefault()
@@ -432,16 +1152,56 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onOpenMenu, 
     setNewTitle(''); setAdding(false)
   }
 
+  function startResize(e) {
+    if (!canWrite) return
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startWidth = columnWidth
+    let latestWidth = startWidth
+
+    const onMove = (moveEvent) => {
+      latestWidth = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX))
+      onResizeColumn(col.id, latestWidth)
+    }
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      onSaveColumnWidth(col.id, latestWidth)
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp, { once:true })
+  }
+
   return (
-    <div style={{
-      flexShrink:0, width:'var(--col-w)',
+    <div ref={setColumnNodeRef} style={{
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? .5 : 1,
+      flexShrink:0, width:`${columnWidth}px`, minWidth:`${MIN_COLUMN_WIDTH}px`, maxWidth:`${MAX_COLUMN_WIDTH}px`,
       background:'var(--ink2)', borderRadius:'8px',
-      display:'flex', flexDirection:'column', maxHeight:'100%',
+      display:'flex', flexDirection:'column', maxHeight:'100%', position:'relative',
     }}>
       {/* Column Header */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'13px 14px', borderBottom:'1px solid var(--bd)' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-          <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)' }}>⠿</span>
+          <button
+            type="button"
+            title="Spalte verschieben"
+            disabled={!canWrite}
+            {...attributes}
+            {...listeners}
+            style={{
+              width:'18px', height:'18px', display:'flex', alignItems:'center', justifyContent:'center',
+              background:'transparent', border:'1px solid transparent', borderRadius:'4px',
+              color:'var(--faint)', fontFamily:'var(--fm)', fontSize:'11px',
+              cursor:canWrite ? 'grab' : 'default', padding:0, flexShrink:0,
+            }}
+          >
+            #
+          </button>
           <span style={{ fontFamily:'var(--fb)', fontSize:'14px', fontWeight:700, color:'var(--td)' }}>{col.title}</span>
           <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', background:'var(--ink3)', border:'1px solid var(--bd)', borderRadius:'10px', padding:'1px 7px' }}>{cards.length}</span>
         </div>
@@ -452,10 +1212,10 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onOpenMenu, 
       </div>
 
       {/* Cards */}
-      <div ref={setNodeRef} style={{ flex:1, overflowY:'auto', padding:'8px', display:'flex', flexDirection:'column', gap:'6px', minHeight:'40px' }}>
+      <div ref={setCardsNodeRef} style={{ flex:1, overflowY:'auto', padding:'8px', display:'flex', flexDirection:'column', gap:'6px', minHeight:'40px' }}>
         <SortableContext items={cards.map(c => c.id)} strategy={verticalListSortingStrategy}>
           {cards.map(card => (
-            <SortableCard key={card.id} card={card} onOpen={() => onOpenCard(card.id)} onOpenMenu={onOpenMenu} />
+            <SortableCard key={card.id} card={card} labelDefinitions={labelDefinitions} onOpen={() => onOpenCard(card.id)} onOpenMenu={onOpenMenu} canWrite={canWrite} />
           ))}
         </SortableContext>
 
@@ -495,15 +1255,29 @@ function KanbanColumn({ col, cards, boardId, onAddCard, onOpenCard, onOpenMenu, 
           + Karte hinzufügen
         </button>
       ) : null}
+
+      {canWrite && (
+        <div
+          onPointerDown={startResize}
+          title="Spaltenbreite ziehen"
+          style={{
+            position:'absolute', right:'-5px', top:'42px', bottom:'8px', width:'10px',
+            cursor:'col-resize', zIndex:5, display:'flex', justifyContent:'center',
+          }}
+        >
+          <div style={{ width:'2px', height:'100%', borderRadius:'2px', background:'rgba(237,234,227,.10)' }} />
+        </div>
+      )}
     </div>
   )
 }
 
 // ── SortableCard ─────────────────────────────────────────────
-function SortableCard({ card, onOpen, onOpenMenu }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id })
+function SortableCard({ card, labelDefinitions, onOpen, onOpenMenu, canWrite }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id, data: { type:'card' }, disabled: !canWrite })
   const p = PRIORITIES[card.priority] || PRIORITIES.medium
   const isOD = card.deadline && new Date(card.deadline) < new Date()
+  const labelDefByName = new Map(labelDefinitions.map(label => [label.name, label]))
 
   return (
     <div
@@ -519,7 +1293,7 @@ function SortableCard({ card, onOpen, onOpenMenu }) {
         {...attributes} {...listeners}
         style={{
           background:'var(--ink3)', border:'1px solid var(--bd)',
-          borderRadius:'8px', padding:'12px 14px', cursor:'pointer',
+          borderRadius:'8px', padding:'12px 14px', cursor:canWrite ? 'pointer' : 'default',
           transition:'border-color .15s, background .15s',
           ...(card.coverColor ? { borderTop:`3px solid ${card.coverColor}` } : {}),
         }}
@@ -528,9 +1302,16 @@ function SortableCard({ card, onOpen, onOpenMenu }) {
       >
         {card.labels?.length > 0 && (
           <div style={{ display:'flex', gap:'4px', flexWrap:'wrap', marginBottom:'6px' }}>
-            {card.labels.map(l => (
-              <span key={l} style={{ fontFamily:'var(--fm)', fontSize:'9px', padding:'2px 6px', borderRadius:'3px', background:'rgba(88,101,242,.15)', color:'var(--em-l)', border:'1px solid rgba(88,101,242,.25)' }}>{l}</span>
-            ))}
+            {card.labels.map(l => {
+              const label = labelDefByName.get(l) || { name:l, color:'#5865f2' }
+              return (
+                <span key={l} style={{
+                  fontFamily:'var(--fm)', fontSize:'9px', padding:'2px 6px', borderRadius:'3px',
+                  background:hexToRgba(label.color, .18), color:label.color,
+                  border:`1px solid ${hexToRgba(label.color, .35)}`,
+                }}>{l}</span>
+              )
+            })}
           </div>
         )}
         <div style={{ fontFamily:'var(--fb)', fontSize:'14px', fontWeight:600, color:'var(--td)', lineHeight:1.4, marginBottom:'8px' }}>
@@ -556,7 +1337,7 @@ function SortableCard({ card, onOpen, onOpenMenu }) {
   )
 }
 
-function CardContextMenu({ card, x, y, canWrite, onClose, onOpen, onPriority, onToggleLabel, onDelete }) {
+function CardContextMenu({ card, x, y, canWrite, labelDefinitions, onClose, onOpen, onPriority, onToggleLabel, onDelete }) {
   if (!card) return null
   const labels = card.labels || []
 
@@ -597,20 +1378,22 @@ function CardContextMenu({ card, x, y, canWrite, onClose, onOpen, onPriority, on
 
       <div style={menuSectionStyle}>Tags</div>
       <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-        {LABELS.map(label => (
+        {labelDefinitions.map(label => (
           <button
-            key={label}
+            key={label.id || label.name}
             disabled={!canWrite}
-            onClick={() => onToggleLabel(label)}
+            onClick={() => onToggleLabel(label.name)}
             style={{
+              display:'flex', alignItems:'center', gap:'5px',
               padding:'4px 8px', borderRadius:'4px', cursor:canWrite ? 'pointer' : 'not-allowed',
-              border: labels.includes(label) ? '1px solid rgba(88,101,242,.55)' : '1px solid var(--bd2)',
-              background: labels.includes(label) ? 'rgba(88,101,242,.25)' : 'var(--ink3)',
-              color: labels.includes(label) ? '#9da5f3' : 'var(--dim)',
+              border: labels.includes(label.name) ? `1px solid ${hexToRgba(label.color, .55)}` : '1px solid var(--bd2)',
+              background: labels.includes(label.name) ? hexToRgba(label.color, .20) : 'var(--ink3)',
+              color: labels.includes(label.name) ? label.color : 'var(--dim)',
               fontFamily:'var(--fm)', fontSize:'10px',
             }}
           >
-            {label}
+            <span style={{ width:'8px', height:'8px', borderRadius:'50%', background:label.color }} />
+            {label.name}
           </button>
         ))}
       </div>

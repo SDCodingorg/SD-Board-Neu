@@ -8,6 +8,7 @@ export default async function SharePage({ params }) {
     where: { shareToken: token, isPublic: true },
     include: {
       columns: { orderBy: { order: 'asc' } },
+      labels:  { orderBy: { order: 'asc' } },
       cards:   { orderBy: { order: 'asc' } }
     }
   })
@@ -30,7 +31,7 @@ export default async function SharePage({ params }) {
         {board.columns.map(col => {
           const cards = board.cards.filter(c => c.columnId === col.id).sort((a,b) => a.order - b.order)
           return (
-            <div key={col.id} style={{ flexShrink:0, width:'300px', background:'#1c1b18', borderRadius:'8px' }}>
+            <div key={col.id} style={{ flexShrink:0, width:`${col.width || 300}px`, background:'#1c1b18', borderRadius:'8px' }}>
               <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(237,234,227,.06)', display:'flex', gap:'8px', alignItems:'center' }}>
                 <span style={{ fontFamily:"'Cabinet Grotesk',sans-serif", fontWeight:700, fontSize:'14px' }}>{col.title}</span>
                 <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:'10px', color:'rgba(237,234,227,.3)', background:'rgba(237,234,227,.04)', border:'1px solid rgba(237,234,227,.08)', borderRadius:'10px', padding:'1px 7px' }}>{cards.length}</span>
