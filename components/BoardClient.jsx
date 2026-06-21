@@ -14,7 +14,7 @@ import { useToast } from '@/context/ToastContext'
 import {
   addCard, importCards, moveCard, deleteBoard, addColumn, deleteColumn, renameColumn, reorderColumns,
   updateColumnWidth, addComment, updateCard, deleteCard, toggleShare, updateChecklist,
-  createBoardLabel, updateBoardLabel, deleteBoardLabel,
+  createBoardLabel, updateBoardLabel, deleteBoardLabel, toggleCardAssignee,
   addBoardMember, updateBoardMemberRole, removeBoardMember
 } from '@/lib/actions/boards'
 import CardModal from './CardModal'
@@ -379,6 +379,30 @@ export default function BoardClient({ board: initialBoard, user }) {
     router.refresh()
   }
 
+  async function quickToggleAssignee(cardId, member) {
+    if (!canWrite) return toast('Du hast nur Leserechte')
+    const userInfo = member.user || {}
+    const assignee = {
+      cardId,
+      userId: member.userId,
+      name: userInfo.name || userInfo.email || 'Nutzer',
+      image: userInfo.image,
+    }
+
+    setBoard(b => ({
+      ...b,
+      cards: b.cards.map(card => {
+        if (card.id !== cardId) return card
+        const current = card.assignees || []
+        const exists = current.some(item => item.userId === member.userId)
+        return { ...card, assignees: exists ? current.filter(item => item.userId !== member.userId) : [...current, assignee] }
+      })
+    }))
+
+    await toggleCardAssignee(board.id, cardId, member.userId)
+    router.refresh()
+  }
+
   function handleResizeColumn(columnId, width) {
     if (!canWrite) return
     const nextWidth = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(width)))
@@ -712,6 +736,7 @@ export default function BoardClient({ board: initialBoard, user }) {
           board={board}
           user={user}
           labelDefinitions={labelDefinitions}
+          canWrite={canWrite}
           onClose={() => setOpenCardId(null)}
           onUpdate={async (cardId, data) => {
             if (!canWrite) return toast('Du hast nur Leserechte')
@@ -737,6 +762,7 @@ export default function BoardClient({ board: initialBoard, user }) {
             await updateChecklist(board.id, cardId, checklists)
             router.refresh()
           }}
+          onToggleAssignee={(cardId, member) => quickToggleAssignee(cardId, member)}
         />
       )}
 
@@ -746,6 +772,7 @@ export default function BoardClient({ board: initialBoard, user }) {
           x={contextMenu.x}
           y={contextMenu.y}
           canWrite={canWrite}
+          boardMembers={board.members || []}
           onClose={() => setContextMenu(null)}
           onOpen={() => {
             setOpenCardId(contextMenu.cardId)
@@ -760,6 +787,7 @@ export default function BoardClient({ board: initialBoard, user }) {
             quickUpdateCard(card.id, { labels: next })
           }}
           labelDefinitions={labelDefinitions}
+          onToggleAssignee={(member) => quickToggleAssignee(contextMenu.cardId, member)}
           onDelete={() => quickDeleteCard(contextMenu.cardId)}
         />
       )}
@@ -1321,11 +1349,24 @@ function SortableCard({ card, labelDefinitions, onOpen, onOpenMenu, canWrite }) 
           <span style={{ fontFamily:'var(--fm)', fontSize:'11px', fontWeight:600, padding:'2px 8px', borderRadius:'3px', background:p.bg, color:p.color, border:`1px solid ${p.border}` }}>
             {p.label}
           </span>
-          {card.deadline && (
-            <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color: isOD ? '#ef4444' : 'var(--faint)' }}>
-              {isOD ? '⚠ ' : ''}{new Date(card.deadline + 'T00:00:00').toLocaleDateString('de-DE')}
-            </span>
-          )}
+          <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+            {card.assignees?.length > 0 && (
+              <div style={{ display:'flex', alignItems:'center' }}>
+                {card.assignees.slice(0, 3).map((assignee, index) => (
+                  assignee.image
+                    ? <img key={assignee.userId} src={assignee.image} alt="" title={assignee.name} style={{ width:'20px', height:'20px', borderRadius:'50%', border:'1px solid var(--ink3)', marginLeft:index ? '-6px' : 0 }} />
+                    : <div key={assignee.userId} title={assignee.name} style={{ width:'20px', height:'20px', borderRadius:'50%', border:'1px solid var(--ink3)', marginLeft:index ? '-6px' : 0, background:'var(--em)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'var(--fd)', fontSize:'10px' }}>
+                        {(assignee.name || '?')[0].toUpperCase()}
+                      </div>
+                ))}
+              </div>
+            )}
+            {card.deadline && (
+              <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color: isOD ? '#ef4444' : 'var(--faint)' }}>
+                {isOD ? '! ' : ''}{new Date(card.deadline + 'T00:00:00').toLocaleDateString('de-DE')}
+              </span>
+            )}
+          </div>
         </div>
         {card.checklists?.length > 0 && (
           <div style={{ marginTop:'7px', fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)' }}>
@@ -1337,9 +1378,10 @@ function SortableCard({ card, labelDefinitions, onOpen, onOpenMenu, canWrite }) 
   )
 }
 
-function CardContextMenu({ card, x, y, canWrite, labelDefinitions, onClose, onOpen, onPriority, onToggleLabel, onDelete }) {
+function CardContextMenu({ card, x, y, canWrite, labelDefinitions, boardMembers, onClose, onOpen, onPriority, onToggleLabel, onToggleAssignee, onDelete }) {
   if (!card) return null
   const labels = card.labels || []
+  const assignees = card.assignees || []
 
   return (
     <div
@@ -1357,6 +1399,36 @@ function CardContextMenu({ card, x, y, canWrite, labelDefinitions, onClose, onOp
       </div>
 
       <button onClick={onOpen} style={menuButtonStyle}>Details oeffnen</button>
+
+      <div style={menuSectionStyle}>Mitglieder</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:'6px', maxHeight:'140px', overflowY:'auto' }}>
+        {boardMembers.map(member => {
+          const userInfo = member.user || {}
+          const assigned = assignees.some(assignee => assignee.userId === member.userId)
+          const name = userInfo.name || userInfo.email || 'Nutzer'
+          return (
+            <button
+              key={member.userId}
+              disabled={!canWrite}
+              onClick={() => onToggleAssignee(member)}
+              style={{
+                display:'grid', gridTemplateColumns:'22px 1fr 18px', gap:'8px', alignItems:'center',
+                padding:'6px 7px', borderRadius:'5px', cursor:canWrite ? 'pointer' : 'not-allowed',
+                border: assigned ? '1px solid rgba(88,101,242,.55)' : '1px solid var(--bd2)',
+                background: assigned ? 'rgba(88,101,242,.18)' : 'var(--ink3)',
+                color: assigned ? 'var(--td)' : 'var(--dim)', textAlign:'left',
+              }}
+            >
+              {userInfo.image
+                ? <img src={userInfo.image} alt="" style={{ width:'22px', height:'22px', borderRadius:'50%' }} />
+                : <span style={{ width:'22px', height:'22px', borderRadius:'50%', background:'var(--em)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'var(--fd)', fontSize:'10px' }}>{name[0].toUpperCase()}</span>
+              }
+              <span style={{ minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontFamily:'var(--fb)', fontSize:'12px' }}>{name}</span>
+              <span style={{ fontFamily:'var(--fm)', fontSize:'11px', color:assigned ? '#9da5f3' : 'var(--faint)' }}>{assigned ? 'x' : '+'}</span>
+            </button>
+          )
+        })}
+      </div>
 
       <div style={menuSectionStyle}>Prioritaet</div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'6px' }}>

@@ -23,7 +23,7 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`
 }
 
-export default function CardModal({ card, board, user, labelDefinitions = [], onClose, onUpdate, onDelete, onAddComment, onUpdateChecklist }) {
+export default function CardModal({ card, board, user, labelDefinitions = [], canWrite = false, onClose, onUpdate, onDelete, onAddComment, onUpdateChecklist, onToggleAssignee }) {
   const toast = useToast()
   const [title,    setTitle]    = useState(card.title)
   const [desc,     setDesc]     = useState(card.description || '')
@@ -226,6 +226,40 @@ export default function CardModal({ card, board, user, labelDefinitions = [], on
             <div>
               <div style={S.sec}>— Deadline</div>
               <input type="date" value={deadline} onChange={e => { setDeadline(e.target.value); save('deadline', e.target.value) }} style={{ ...S.inp, padding:'8px' }} />
+            </div>
+
+            {/* Members */}
+            <div>
+              <div style={S.sec}>— Mitglieder</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:'6px', maxHeight:'160px', overflowY:'auto' }}>
+                {board.members?.map(member => {
+                  const userInfo = member.user || {}
+                  const assigned = card.assignees?.some(assignee => assignee.userId === member.userId)
+                  const name = userInfo.name || userInfo.email || 'Nutzer'
+                  return (
+                    <button
+                      key={member.userId}
+                      type="button"
+                      disabled={!canWrite}
+                      onClick={() => onToggleAssignee(card.id, member)}
+                      style={{
+                        display:'grid', gridTemplateColumns:'24px 1fr 18px', alignItems:'center', gap:'8px',
+                        padding:'6px 7px', borderRadius:'5px', cursor:canWrite ? 'pointer' : 'not-allowed',
+                        border:assigned ? '1px solid rgba(88,101,242,.55)' : '1px solid var(--bd2)',
+                        background:assigned ? 'rgba(88,101,242,.18)' : 'var(--ink4)',
+                        color:assigned ? 'var(--td)' : 'var(--dim)', textAlign:'left',
+                      }}
+                    >
+                      {userInfo.image
+                        ? <img src={userInfo.image} alt="" style={{ width:'24px', height:'24px', borderRadius:'50%' }} />
+                        : <span style={{ width:'24px', height:'24px', borderRadius:'50%', background:'var(--em)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'var(--fd)', fontSize:'11px' }}>{name[0].toUpperCase()}</span>
+                      }
+                      <span style={{ minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontFamily:'var(--fb)', fontSize:'12px' }}>{name}</span>
+                      <span style={{ fontFamily:'var(--fm)', fontSize:'11px', color:assigned ? '#9da5f3' : 'var(--faint)' }}>{assigned ? 'x' : '+'}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
             {/* Labels */}
