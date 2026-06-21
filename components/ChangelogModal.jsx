@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 
-const CHANGELOG_VERSION = '2026-06-21-haefx-1'
+const CHANGELOG_VERSION = '2026-06-21-haefx-2'
 
 const CHANGELOG = {
   title: 'Changelog',
@@ -21,6 +21,8 @@ const CHANGELOG = {
         'Eigene Board-Labels mit Farben, Bearbeiten, Loeschen und automatischer Karten-Aktualisierung.',
         'Cards koennen aus JSON oder Textlisten importiert werden.',
         'Card-Import unterstuetzt Custom Labels, Zielspalten, Prioritaeten, Daten, Beschreibungen und Checklisten.',
+        'Board-Namen koennen direkt im Board-Header bearbeitet werden.',
+        'Card-Import kann fehlende Spalten automatisch aus dem angegebenen Spaltentitel erstellen.',
       ],
     },
     {
@@ -43,6 +45,8 @@ const CHANGELOG = {
         'Share-Ansicht nutzt gespeicherte Spaltenbreiten.',
         'Filter-Reminder aktivieren direkt die passenden Boardfilter.',
         'Neue Labels aus Importen werden automatisch als Board-Labels angelegt.',
+        'Importierte Cards werden additiv angelegt, bestehende Cards bleiben unveraendert.',
+        'Board-Updates validieren erlaubte Felder serverseitig vor dem Speichern.',
       ],
     },
   ],

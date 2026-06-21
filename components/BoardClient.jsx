@@ -12,7 +12,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/context/ToastContext'
 import {
-  addCard, importCards, moveCard, deleteBoard, addColumn, deleteColumn, renameColumn, reorderColumns,
+  addCard, importCards, moveCard, deleteBoard, updateBoard, addColumn, deleteColumn, renameColumn, reorderColumns,
   updateColumnWidth, addComment, updateCard, deleteCard, toggleShare, updateChecklist,
   createBoardLabel, updateBoardLabel, deleteBoardLabel, toggleCardAssignee,
   addBoardMember, updateBoardMemberRole, removeBoardMember
@@ -129,6 +129,8 @@ export default function BoardClient({ board: initialBoard, user }) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [filters, setFilters] = useState(defaultFilters)
+  const [editingBoardTitle, setEditingBoardTitle] = useState(false)
+  const [boardTitleDraft, setBoardTitleDraft] = useState(initialBoard.title || '')
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
@@ -456,9 +458,36 @@ export default function BoardClient({ board: initialBoard, user }) {
   async function handleImportCards(defaultColumnId, parsedCards) {
     if (!canWrite) return toast('Du hast nur Leserechte')
     const result = await importCards(board.id, defaultColumnId, parsedCards)
-    toast(`${result.count} Karten importiert`)
+    toast(`${result.count} Karten importiert${result.createdColumns ? `, ${result.createdColumns} Spalte(n) erstellt` : ''}`)
     setImportOpen(false)
     router.refresh()
+  }
+
+  async function handleSaveBoardTitle() {
+    if (!canWrite) return toast('Du hast nur Leserechte')
+    const title = boardTitleDraft.trim()
+    if (!title) {
+      setBoardTitleDraft(board.title)
+      setEditingBoardTitle(false)
+      return toast('Board-Name ist erforderlich')
+    }
+    if (title === board.title) {
+      setEditingBoardTitle(false)
+      return
+    }
+
+    const previousTitle = board.title
+    setBoard(current => ({ ...current, title }))
+    setEditingBoardTitle(false)
+    try {
+      await updateBoard(board.id, { title })
+      toast('Board umbenannt')
+      router.refresh()
+    } catch (error) {
+      setBoard(current => ({ ...current, title: previousTitle }))
+      setBoardTitleDraft(previousTitle)
+      toast(error.message || 'Board konnte nicht umbenannt werden')
+    }
   }
 
   const viewBtn = (v, label) => (
@@ -485,7 +514,45 @@ export default function BoardClient({ board: initialBoard, user }) {
         <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
           <button onClick={() => router.push('/')} style={{ background:'var(--ink4)', border:'1px solid var(--bd2)', borderRadius:'4px', color:'var(--dim)', width:'32px', height:'32px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px', cursor:'pointer' }}>←</button>
           <div style={{ width:'4px', height:'4px', borderRadius:'50%', background:board.coverColor }} />
-          <span style={{ fontFamily:'var(--fd)', fontSize:'22px', letterSpacing:'1px', color:'var(--td)' }}>{board.title}</span>
+          {editingBoardTitle ? (
+            <input
+              value={boardTitleDraft}
+              autoFocus
+              onChange={e => setBoardTitleDraft(e.target.value)}
+              onBlur={handleSaveBoardTitle}
+              onKeyDown={e => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+                if (e.key === 'Escape') {
+                  setBoardTitleDraft(board.title)
+                  setEditingBoardTitle(false)
+                }
+              }}
+              style={{
+                width:'min(360px, 34vw)', padding:'5px 8px', borderRadius:'5px',
+                border:'1px solid rgba(88,101,242,.45)', background:'var(--ink3)',
+                color:'var(--td)', outline:'none', fontFamily:'var(--fd)', fontSize:'22px',
+                letterSpacing:'1px',
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              disabled={!canWrite}
+              title={canWrite ? 'Board umbenennen' : 'Nur mit Schreibrechten moeglich'}
+              onClick={() => {
+                if (!canWrite) return
+                setBoardTitleDraft(board.title)
+                setEditingBoardTitle(true)
+              }}
+              style={{
+                padding:0, border:'none', background:'transparent',
+                fontFamily:'var(--fd)', fontSize:'22px', letterSpacing:'1px',
+                color:'var(--td)', cursor:canWrite ? 'text' : 'default',
+              }}
+            >
+              {board.title}
+            </button>
+          )}
           <span style={{ fontFamily:'var(--fm)', fontSize:'11px', color:'var(--faint)' }}>{board.cards.length} Aufgaben</span>
           <span style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)', textTransform:'uppercase' }}>{currentRole}</span>
         </div>
@@ -1040,7 +1107,7 @@ function ImportCardsPanel({ columns, onClose, onImport }) {
       "priority": "high",
       "labels": ["qa", "auth"],
       "deadline": "2026-07-01",
-      "column": "In Arbeit",
+      "column": "Neue Spalte oder vorhandener Spaltentitel",
       "checklists": [
         {
           "title": "Testplan",
@@ -1083,7 +1150,7 @@ function ImportCardsPanel({ columns, onClose, onImport }) {
         <div>
           <div style={{ fontFamily:'var(--fd)', fontSize:'22px', letterSpacing:'1px', color:'var(--td)' }}>Cards importieren</div>
           <div style={{ fontFamily:'var(--fm)', fontSize:'10px', color:'var(--faint)' }}>
-            JSON oder einfache Textliste einfuegen
+            JSON oder einfache Textliste einfuegen. Neue Spalten werden aus "column" automatisch erstellt.
           </div>
         </div>
         <button onClick={onClose} style={{ background:'transparent', border:'none', color:'var(--faint)', fontSize:'18px', cursor:'pointer' }}>x</button>
