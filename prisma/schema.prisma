@@ -172,8 +172,6 @@ model CardAssignee {
   image  String?
 
   card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
-
-  @@unique([cardId, userId])
 }
 
 model TimeTracking {
