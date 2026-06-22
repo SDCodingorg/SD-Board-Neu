@@ -17,13 +17,13 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts  Account[]
-  sessions  Session[]
-  boards    BoardMember[]
-  ownedBoards Board[]    @relation("BoardOwner")
-  cards     Card[]       @relation("CardCreator")
-  comments  Comment[]
-  activities Activity[]
+  accounts    Account[]
+  sessions    Session[]
+  boards      BoardMember[]
+  ownedBoards Board[]       @relation("BoardOwner")
+  cards       Card[]        @relation("CardCreator")
+  comments    Comment[]
+  activities  Activity[]
 }
 
 model Account {
@@ -39,7 +39,8 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([provider, providerAccountId])
 }
 
@@ -63,13 +64,24 @@ model Board {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  ownerId  String
-  owner    User          @relation("BoardOwner", fields: [ownerId], references: [id])
-  members  BoardMember[]
-  columns  Column[]
-  cards    Card[]
-  labels   BoardLabel[]
+  ownerId    String
+  owner      User             @relation("BoardOwner", fields: [ownerId], references: [id])
+  members    BoardMember[]
+  columns    Column[]
+  cards      Card[]
+  labels     BoardLabel[]
+  whiteboard BoardWhiteboard?
   activities Activity[]
+}
+
+model BoardWhiteboard {
+  id        String   @id @default(cuid())
+  boardId   String   @unique
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
 }
 
 model BoardLabel {
@@ -97,11 +109,11 @@ model BoardMember {
 }
 
 model Column {
-  id       String @id @default(cuid())
-  title    String
-  order    Int    @default(0)
-  width    Int    @default(300)
-  boardId  String
+  id      String @id @default(cuid())
+  title   String
+  order   Int    @default(0)
+  width   Int    @default(300)
+  boardId String
 
   board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
   cards Card[]
@@ -124,12 +136,12 @@ model Card {
   boardId     String
   createdById String
 
-  column    Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
-  board     Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  createdBy User      @relation("CardCreator", fields: [createdById], references: [id])
-  comments  Comment[]
-  checklists Checklist[]
-  assignees CardAssignee[]
+  column       Column         @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  board        Board          @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  createdBy    User           @relation("CardCreator", fields: [createdById], references: [id])
+  comments     Comment[]
+  checklists   Checklist[]
+  assignees    CardAssignee[]
   timeTracking TimeTracking?
 }
 
@@ -145,10 +157,10 @@ model Comment {
 }
 
 model Checklist {
-  id     String          @id @default(cuid())
+  id     String @id @default(cuid())
   title  String
   cardId String
-  order  Int             @default(0)
+  order  Int    @default(0)
 
   card  Card            @relation(fields: [cardId], references: [id], onDelete: Cascade)
   items ChecklistItem[]
@@ -165,7 +177,7 @@ model ChecklistItem {
 }
 
 model CardAssignee {
-  id     String @id @default(cuid())
+  id     String  @id @default(cuid())
   cardId String
   userId String
   name   String

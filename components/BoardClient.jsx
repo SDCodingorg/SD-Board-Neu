@@ -18,6 +18,7 @@ import {
   addBoardMember, updateBoardMemberRole, removeBoardMember
 } from '@/lib/actions/boards'
 import CardModal from './CardModal'
+import WhiteboardView from './WhiteboardView'
 
 const PRIORITIES = {
   high:   { color:'#ef4444', bg:'rgba(239,68,68,.15)',   border:'rgba(239,68,68,.3)',  label:'High'   },
@@ -561,6 +562,7 @@ export default function BoardClient({ board: initialBoard, user }) {
           {viewBtn('kanban','⊞ Board')}
           {viewBtn('calendar','≡ Kalender')}
           {viewBtn('timeline','→ Timeline')}
+          {viewBtn('whiteboard','□ Whiteboard')}
 
           <div style={{ width:'1px', height:'20px', background:'var(--bd2)', margin:'0 4px' }} />
 
@@ -768,6 +770,21 @@ export default function BoardClient({ board: initialBoard, user }) {
         <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--ink)' }}>
           <div style={{ fontFamily:'var(--fm)', fontSize:'13px', color:'var(--faint)' }}>Kalender kommt bald</div>
         </div>
+      )}
+
+      {view === 'timeline' && (
+        <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--ink)' }}>
+          <div style={{ fontFamily:'var(--fm)', fontSize:'13px', color:'var(--faint)' }}>Timeline kommt bald</div>
+        </div>
+      )}
+
+      {view === 'whiteboard' && (
+        <WhiteboardView
+          boardId={board.id}
+          initialData={board.whiteboard?.data}
+          canWrite={canWrite}
+          toast={toast}
+        />
       )}
 
       {filtersOpen && (

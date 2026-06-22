@@ -38,6 +38,7 @@ export default async function BoardPage({ params }) {
       },
       columns: { orderBy: { order: 'asc' } },
       labels: { orderBy: { order: 'asc' } },
+      whiteboard: true,
       cards: {
         include: {
           comments: { include: { author: { select: { id:true, name:true, image:true } } }, orderBy: { createdAt: 'asc' } },
@@ -60,6 +61,7 @@ export default async function BoardPage({ params }) {
     data.labels.map(l => `${l.id}:${l.name}:${l.color}`).join('|'),
     data.cards.map(c => `${c.id}:${c.columnId}:${c.order}`).join('|'),
     data.members.map(m => `${m.userId}:${m.role}`).join('|'),
+    data.whiteboard?.updatedAt || '',
   ].join('::')
 
   return (

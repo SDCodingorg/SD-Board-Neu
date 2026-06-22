@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 
-const CHANGELOG_VERSION = '2026-06-21-haefx-2'
+const CHANGELOG_VERSION = '2026-06-22-haefx-1'
 
 const CHANGELOG = {
   title: 'Changelog',
@@ -23,6 +23,9 @@ const CHANGELOG = {
         'Card-Import unterstuetzt Custom Labels, Zielspalten, Prioritaeten, Daten, Beschreibungen und Checklisten.',
         'Board-Namen koennen direkt im Board-Header bearbeitet werden.',
         'Card-Import kann fehlende Spalten automatisch aus dem angegebenen Spaltentitel erstellen.',
+        'Whiteboard-Tab pro Board mit Stift, Sticky Notes, Textfeldern und markierbaren Zonen.',
+        'Whiteboards werden pro Board automatisch gespeichert und bleiben persistent erhalten.',
+        'Whiteboards oder einzelne Zonen koennen als PDF exportiert werden.',
       ],
     },
     {
@@ -47,6 +50,7 @@ const CHANGELOG = {
         'Neue Labels aus Importen werden automatisch als Board-Labels angelegt.',
         'Importierte Cards werden additiv angelegt, bestehende Cards bleiben unveraendert.',
         'Board-Updates validieren erlaubte Felder serverseitig vor dem Speichern.',
+        'Whiteboard-Autosave speichert ohne sichtbaren Seiten-Refresh.',
       ],
     },
   ],
