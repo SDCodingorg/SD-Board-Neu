@@ -61,7 +61,6 @@ export default async function BoardPage({ params }) {
     data.labels.map(l => `${l.id}:${l.name}:${l.color}`).join('|'),
     data.cards.map(c => `${c.id}:${c.columnId}:${c.order}`).join('|'),
     data.members.map(m => `${m.userId}:${m.role}`).join('|'),
-    data.whiteboard?.updatedAt || '',
   ].join('::')
 
   return (
